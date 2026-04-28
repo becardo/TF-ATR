@@ -92,4 +92,24 @@ Este projeto segue o padrão **Conventional Commits**, visando manter um histór
 | `test`   | Adição ou alteração de testes |
 | `chore`  | Configurações e tarefas auxiliares |
 
+## Estrutura do Projeto
 
+/projeto_inspecao
+│
+├── src_cpp/              # Código fonte C++ (Threads, PID, Mutexes, MQTT)
+│   ├── main.cpp
+│   ├── controller.cpp
+│   ├── tasks.cpp
+│   └── CMakeLists.txt
+│
+├── src_python/           # Scripts Python (Simulação, GUI, Física)
+│   ├── gui_main.py
+│   ├── robot_physics.py
+│   └── requirements.txt
+│
+├── docs/                 # Relatórios e diagramas
+├── logs/                 # Arquivos .csv gerados
+│
+├── run_all.sh            # Script pra rodar tudo
+├── README.md
+└── .gitignore
