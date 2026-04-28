@@ -1,0 +1,37 @@
+---
+title: "Sistema de Inspeção Autônoma de Túneis"
+author: 
+  - "Ana Beatriz Soares Cardoso"
+  - "Julia Pereira Maia Ribeiro"
+  - "Pedro Eduardo Alvino Tapia"
+format: pdf
+toc: true
+number-sections: true
+---
+
+# Introdução
+
+Este trabalho apresenta o desenvolvimento de um sistema de inspeção automática de túneis utilizando conceitos de sistemas em tempo real.
+
+# Objetivos
+
+- Implementar um sistema multitarefa
+- Simular sensores e atuadores
+- Aplicar sincronização entre tarefas
+- Integrar comunicação via MQTT
+
+# Arquitetura do Sistema
+
+Descreva aqui a arquitetura geral do sistema.
+
+# Implementação
+
+## Exemplo de código C++
+
+```cpp
+#include <iostream>
+
+int main() {
+    std::cout << "Hello, ATR!" << std::endl;
+    return 0;
+}
