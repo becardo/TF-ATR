@@ -8,12 +8,34 @@ Contém as threads responsáveis por ler a odometria, mapear o teto com LIDAR,
 acionar a câmera em caso de falha e salvar os dados em disco (HD). 
 */
 
+class LidarFilter {
+private:
+    std::vector<int> buffer;
+    int head = 0;
+    int window_size;
+    float ultima_media = 0.0;
+
+public:
+    LidarFilter(int size = 5) : window_size(size), buffer(size, 0) {}
+
+    float calcular(int nova_leitura) {
+        buffer[head] = nova_leitura;
+        head = (head + 1) % window_size;
+        float soma = std::accumulate(buffer.begin(), buffer.end(), 0.0);
+        ultima_media = soma / window_size;
+        return ultima_media;
+    }
+
+    float get_ultima_media() { return ultima_media; }
+};
 // Odometria: Produtor 
 void t_calculo_distancia(SensorBuffer& sensor) {
     /* Instanciar a classe da Odometria aqui*/
+    Odometria odo;
 
     while (true) { 
         /*Incluir chamada da função da odometria aqui*/
+        extern bool i_encoder;
 
         Medicao nova_medicao;
         nova_medicao.posicao_x = 10; // Exemplo
@@ -31,9 +53,13 @@ void t_calculo_distancia(SensorBuffer& sensor) {
 // LIDAR / Reconstrução do teto: Produtor
 void t_reconstrucao_teto(SensorBuffer& sensor) {
     /*Instanciar a classe do LIDAR aqui*/
+    LidarFilter filtro(5);
+    float limite_falha = 0.5;
 
     while (true) { 
         /*Incluir chamada da função do LIDAR aqui*/
+        extern int i_lidar;
+        float media_atual = filtro.calcular(i_lidar);
 
 
         bool achou_buraco = false; // True se o LIDAR detectar uma falha
