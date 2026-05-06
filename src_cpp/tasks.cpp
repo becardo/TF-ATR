@@ -1,4 +1,6 @@
 #include "shared_buffers.hpp"
+#include "Lidar.hpp"
+#include "Odometria.hpp"
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -10,17 +12,22 @@ acionar a câmera em caso de falha e salvar os dados em disco (HD).
 
 // Odometria: Produtor 
 void t_calculo_distancia(SensorBuffer& sensor) {
-    /* Instanciar a classe da Odometria aqui*/
+    Odometria odo; // Instancia da classe Odometria 
 
     while (true) { 
-        /*Incluir chamada da função da odometria aqui*/
+        // Simulação: alternando sinal do encoder para testar a contagem
+        static bool i_encoder = false;
+        i_encoder = !i_encoder; 
 
-        Medicao nova_medicao;
-        nova_medicao.posicao_x = 10; // Exemplo
+        int dist_x = odo.atualizar(i_encoder);
+
+        Medicao m;
+        m.posicao_x = dist_x;
+        m.timestamp = std::chrono::system_clock::now().time_since_epoch().count();
 
         // ----- Zona Crítica: Guardar a leitura na fila -----
         sensor.mtx_fila.lock();
-        sensor.fila_medicoes.push(nova_medicao);
+        sensor.fila_medicoes.push(m);
         sensor.mtx_fila.unlock();
 
         // Ciclo da odometria (20ms)
@@ -30,18 +37,18 @@ void t_calculo_distancia(SensorBuffer& sensor) {
 
 // LIDAR / Reconstrução do teto: Produtor
 void t_reconstrucao_teto(SensorBuffer& sensor) {
-    /*Instanciar a classe do LIDAR aqui*/
+    LidarFilter filtro(5); // Instancia da classe LIDAR
+    float limite_falha = 30.0; // Ajuste conforme necessário
 
     while (true) { 
-        /*Incluir chamada da função do LIDAR aqui*/
-
-
-        bool achou_buraco = false; // True se o LIDAR detectar uma falha
+        int leitura_bruta = 40; // Simulação de leitura normal
+        float media = filtro.calcular(leitura_bruta);
 
         // Se achou um buraco, aciona o Alarme da Câmera
-        if (achou_buraco) {
+        if (media > limite_falha) {
             sensor.mtx_camera.lock();
-            sensor.falha_detectada = true;
+            sensor.e_inspecao = true;      
+            sensor.o_liga_camera = true;    // Manda o comando pra ligar a camera
             sensor.mtx_camera.unlock();
             
             // Toca o alarme para acordar a thread da Câmera
@@ -60,14 +67,15 @@ void t_inspecao_camera(SensorBuffer& sensor) {
         std::unique_lock<std::mutex> lock_camera(sensor.mtx_camera);
         
         // A Câmera dorme. Só acorda quando o LIDAR der o 'notify_one()' E a falha_detectada for true.
-        sensor.cv_camera.wait(lock_camera, [&sensor] { return sensor.falha_detectada; });
+        sensor.cv_camera.wait(lock_camera, [&sensor] { return sensor.e_inspecao; });
 
         /* Inserir lógica "tirar foto" aqui*/
 
         std::cout << "[CAMERA] Falha detectada! Tirando foto...\n";
 
         // Reseta o gatilho para a câmera voltar a dormir
-        sensor.falha_detectada = false;
+        sensor.e_inspecao = false;
+        sensor.o_liga_camera = false;
 
     }
 }

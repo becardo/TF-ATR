@@ -15,19 +15,20 @@ void t_comando_navegacao(NavBuffer& nav) {
     while (true) {
         // ----- Mock de entradas -----
         // (Serão substítuidos posteriormente por leiturais reais, via interface/MQTT a ser desenvolvida)
-        bool botao_auto = false;
-        bool botao_manual = true;
-        double velocidade_joystick = 30.0; 
-        bool botao_parar = false;
+        bool c_automatico = false; // Comando para passar para o modo automático
+        bool c_man = true;         // Comando para passar para o modo manual
+        bool c_para = false;       // Comando para parar o robô
+
+        double velocidade_joystick = 30.0; // Simulação do sinal vindo do joystick para o Setpoint
 
         // Processamento da lógica de estado da navegação
-        nav_manager.updateMode(botao_auto, botao_manual);
-        nav_manager.processInputs(velocidade_joystick, botao_parar);
+        nav_manager.updateMode(c_automatico, c_man);
+        nav_manager.processInputs(velocidade_joystick, c_para);
 
         // ----- Zona Crítica: Escrita no Buffer Compartilhado -----
         nav.mtx.lock(); // Tranca o cadeado antes de mexer na memória
-        nav.modo_automatico = (nav_manager.getMode() == NavMode::AUTOMATIC);
-        nav.setpoint_velocidade = static_cast<int>(nav_manager.getTargetSpeed());
+        nav.e_automatico = (nav_manager.getMode() == NavMode::AUTOMATIC);
+        nav.j_sp_velocidade = static_cast<int>(nav_manager.getTargetSpeed());
         nav.mtx.unlock(); // Destranca o cadeado após alterar a memória
 
         // Aguarda o fim do ciclo de 80ms
@@ -46,7 +47,7 @@ void t_controle_navegacao(NavBuffer& nav) {
 
         // --- Zona Crítica: Leitura do Setpoint ---
         nav.mtx.lock(); // Tranca para ler a velocidade que o robo deve alcançar
-        setpoint_atual = nav.setpoint_velocidade;
+        setpoint_atual = nav.j_sp_velocidade;
         nav.mtx.unlock(); // Destranca após a leitura
 
         // Mock da velocidade atual 
@@ -55,11 +56,11 @@ void t_controle_navegacao(NavBuffer& nav) {
         // Calcula o PID fora da Zona Crítica, para não travar o sistema durante o cálculo
         double saida_aceleracao = pid.compute(static_cast<double>(setpoint_atual), velocidade_atual_robo);
 
-        //std::cout << "[PID] Setpoint: " << setpoint_atual << " | Aceleracao calculada: " << saida_aceleracao << "\n";
+        std::cout << "[PID] Setpoint: " << setpoint_atual << " | Aceleracao calculada: " << saida_aceleracao << "\n";
         
         // ----- Zona Crítica: Escrita da Aceleração -----
         nav.mtx.lock(); // Tranca para escrever o resultado
-        nav.aceleracao = static_cast<int>(saida_aceleracao);
+        nav.o_aceleracao = static_cast<int>(saida_aceleracao);
         nav.mtx.unlock(); // Destranca
 
         // Aguarda o fim do ciclo de 80ms

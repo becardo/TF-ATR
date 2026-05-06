@@ -15,9 +15,9 @@ exclusão mútua nas zonas críticas, evitando condições de corrida.
 // Armazena os dados de troca entre os comandos do usuário e o controle PID
 // do robo. Protegida por MUTEX para evitar Condição de Corrida.
 struct NavBuffer {
-    int setpoint_velocidade = 0; // Velocidade alvo solicitada (cm/s)
-    int aceleracao = 0;          // Esforço do controle calculado pelo PID
-    bool modo_automatico = false;// Estado de operação (Manual ou Auto)
+    int j_sp_velocidade = 0; // Velocidade alvo solicitada (cm/s)
+    int o_aceleracao = 0;          // Esforço do controle calculado pelo PID
+    bool e_automatico = false;// Estado de operação (Manual ou Auto)
     std::mutex mtx;              // O cadeado do PID
 };
 
@@ -26,7 +26,7 @@ struct NavBuffer {
 struct Medicao {
     long long timestamp; // Tempo da leitura (ms)
     int posicao_x;       // Odometria: Posição atual no eixo X
-    int leitura_y;       // LIDAR: Distância até o teto
+    int i_lidar;       // LIDAR: Distância até o teto
     int nivel_confianca; // Qualidade da medição (0 a 100)
 };
 
@@ -39,11 +39,12 @@ struct SensorBuffer {
     std::mutex mtx_fila; // Cadeado para a inserção e remição da fila
 
     // ----- Sistema de Alarme - Interrupção (Câmera) -----
-    bool falha_detectada = false; // FLAG que indica se o teto tem buracos
+    bool e_inspecao = false; // FLAG que indica se o teto tem buracos
     std::mutex mtx_camera;        // Cadeado para proteger a alteração da FLAG
 
     // Variável de Condição (Alarme): mantém a thread da câmera dormindo 
     // até receber o sinal 'notify_one()' do sensor do teto.
+    bool o_liga_camera = false;
     std::condition_variable cv_camera; // O alarme da câmera
 };
 

@@ -2,7 +2,7 @@
 #include <algorithm> 
 
 PIDController::PIDController(double kp, double ki, double kd, double sample_time)
-    : Kp(kp), Ki(ki), Kd(kd), dt(sample_time), integral(0.0), last_error(0.0), output_limit(100.0) {}
+    : Kp(kp), Ki(ki), Kd(kd), integral(0.0), dt(sample_time), last_error(0.0), output_limit(100.0) {}
 
 void PIDController::setGains(double kp, double ki, double kd) {
     Kp = kp;
