@@ -11,6 +11,8 @@ private:
     float ultima_media = 0.0;
 
 public:
+    // Escolha: size = 5. Com a janela cíclica de 100ms, uma janela de tamanho 5
+    // dá um atraso de meio segundo, filtrando picos isolados do sensor.
     LidarFilter(int size = 5);
     float calcular(int nova_leitura);
     float get_ultima_media();

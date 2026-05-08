@@ -7,7 +7,9 @@ TARGET = inspecao_tuneis
 SRCS = src_cpp/main.cpp \
        src_cpp/NavigationManager.cpp \
        src_cpp/PIDController.cpp \
-       src_cpp/tasks.cpp
+       src_cpp/tasks.cpp \
+       src_cpp/Lidar.cpp \
+       src_cpp/Odometria.cpp
 
 all: clean $(TARGET)
 

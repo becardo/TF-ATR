@@ -38,12 +38,14 @@ struct SensorBuffer {
     std::queue<Medicao> fila_medicoes; 
     std::mutex mtx_fila; // Cadeado para a inserção e remição da fila
 
+    // Variável de condição para o Coletor de Dados.
+    std::condition_variable cv_coletor;
+
     // ----- Sistema de Alarme - Interrupção (Câmera) -----
     bool e_inspecao = false; // FLAG que indica se o teto tem buracos
     std::mutex mtx_camera;        // Cadeado para proteger a alteração da FLAG
 
-    // Variável de Condição (Alarme): mantém a thread da câmera dormindo 
-    // até receber o sinal 'notify_one()' do sensor do teto.
+    // Variável de Condição para a Câmera 
     bool o_liga_camera = false;
     std::condition_variable cv_camera; // O alarme da câmera
 };

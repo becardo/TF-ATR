@@ -1,8 +1,10 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <boost/asio.hpp>
 
 // Inclusão dos Buffers e Blocos de Execução
+#include "tasks.hpp"
 #include "shared_buffers.hpp"
 #include "NavigationManager.hpp"
 #include "PIDController.hpp"
@@ -12,7 +14,17 @@
 void t_comando_navegacao(NavBuffer& nav) {
     NavigationManager nav_manager; 
 
-    while (true) {
+    boost::asio::io_context io_com_nav; // Maestro para gerenciar os eventos da thread do Comando de Navegação.
+    boost::asio::steady_timer timer_com_nav(io_com_nav, boost::asio::chrono::milliseconds(80)); 
+
+    // Função apara chamar o loop a ser executado
+    std::function<void(const boost::system::error_code&)> loop_comando;
+
+    // Função que o timer executa quando "toca"
+    loop_comando = ([&](const boost::system::error_code& erro){
+
+        if(erro) return;
+
         // ----- Mock de entradas -----
         // (Serão substítuidos posteriormente por leiturais reais, via interface/MQTT a ser desenvolvida)
         bool c_automatico = false; // Comando para passar para o modo automático
@@ -31,9 +43,16 @@ void t_comando_navegacao(NavBuffer& nav) {
         nav.j_sp_velocidade = static_cast<int>(nav_manager.getTargetSpeed());
         nav.mtx.unlock(); // Destranca o cadeado após alterar a memória
 
-        // Aguarda o fim do ciclo de 80ms
-        std::this_thread::sleep_for(std::chrono::milliseconds(80));
-    }
+        // Loop de repetição do timer: sempre que o tempo expirar, somam-se 80ms 
+        // e o timer é disparado novamente.
+        timer_com_nav.expires_at(timer_com_nav.expiry() + boost::asio::chrono::milliseconds(80));
+        timer_com_nav.async_wait(loop_comando);
+    });
+
+    // Gatilho de início da contagem: 80ms
+    timer_com_nav.async_wait(loop_comando);
+    io_com_nav.run();
+
 }
 
 // Thread responsável pelo controle PID
@@ -42,7 +61,15 @@ void t_controle_navegacao(NavBuffer& nav) {
     // Kp, Ki, Kd iniciais e tempo de amostragem de 80ms (0.08)
     PIDController pid(1.0, 0.1, 0.05, 0.08);
 
-    while (true) {
+    boost::asio::io_context io_PID_nav;
+    boost::asio::steady_timer timer_PID_nav(io_PID_nav, boost::asio::chrono::milliseconds(80));
+
+    std::function<void(const boost::system::error_code&)> loop_PID;
+
+    loop_PID = ([&](const boost::system::error_code& erro){
+
+        if(erro) return;
+
         int setpoint_atual = 0;
 
         // --- Zona Crítica: Leitura do Setpoint ---
@@ -63,16 +90,13 @@ void t_controle_navegacao(NavBuffer& nav) {
         nav.o_aceleracao = static_cast<int>(saida_aceleracao);
         nav.mtx.unlock(); // Destranca
 
-        // Aguarda o fim do ciclo de 80ms
-        std::this_thread::sleep_for(std::chrono::milliseconds(80));
-    }
-}
+        timer_PID_nav.expires_at(timer_PID_nav.expiry() + boost::asio::chrono::milliseconds(80));
+        timer_PID_nav.async_wait(loop_PID);
+    });
 
-// Assinatura dos sensores
-extern void t_calculo_distancia(SensorBuffer& sensor);
-extern void t_reconstrucao_teto(SensorBuffer& sensor);
-extern void t_inspecao_camera(SensorBuffer& sensor);
-extern void t_coletor_dados(SensorBuffer& sensor);
+    timer_PID_nav.async_wait(loop_PID);
+    io_PID_nav.run();
+}
 
 int main() {
     std::cout << "Iniciando Sistema de Inspecao do Tunel...\n";
