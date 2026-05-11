@@ -133,7 +133,7 @@ void t_controle_navegacao(NavBuffer& nav) {
     io_PID_nav.run();
 }
 
-void t_coletor_dados(SensorBuffer& sensor) {
+/*void t_coletor_dados(SensorBuffer& sensor) {
     // Configuração do arquivo de saída
     std::ofstream log_file("telemetria_inspecao.csv", std::ios::app);
     
@@ -174,6 +174,48 @@ void t_coletor_dados(SensorBuffer& sensor) {
 
         // Feedback no console para debug (opcional, pode ser removido para performance)
         // std::cout << "[LOG] Dados gravados em disco.\n";
+
+        timer_log.expires_at(timer_log.expiry() + boost::asio::chrono::milliseconds(100));
+        timer_log.async_wait(loop_log);
+    });
+
+    timer_log.async_wait(loop_log);
+    io_log.run();
+
+    if (log_file.is_open()) {
+        log_file.close();
+    }
+} */
+
+void t_coletor_dados(SensorBuffer& sensor) {
+    std::ofstream log_file("telemetria_inspecao.csv", std::ios::app);
+    
+    if (!log_file.is_open()) {
+        return;
+    }
+
+    boost::asio::io_context io_log;
+    boost::asio::steady_timer timer_log(io_log, boost::asio::chrono::milliseconds(100));
+
+    std::function<void(const boost::system::error_code&)> loop_log;
+
+    loop_log = ([&](const boost::system::error_code& erro) {
+        if (erro) return;
+
+        // ----- Zona Crítica: Consumo da Fila -----
+        std::unique_lock<std::mutex> lock(sensor.mtx_fila); // Trava o mutex específico da fila
+        
+        while(!sensor.fila_medicoes.empty()) { // Varre o buffer preenchido pelos Devs B e C
+            Medicao dado = sensor.fila_medicoes.front(); // Pega o dado mais antigo
+            sensor.fila_medicoes.pop(); // Remove da fila
+
+            // Escrita formatada conforme solicitado
+            log_file << dado.timestamp << "," 
+                     << dado.posicao_x << "," 
+                     << dado.i_lidar << "," 
+                     << dado.nivel_confianca << "\n";
+        }
+        lock.unlock(); // Libera o buffer o mais rápido possível
 
         timer_log.expires_at(timer_log.expiry() + boost::asio::chrono::milliseconds(100));
         timer_log.async_wait(loop_log);
