@@ -6,12 +6,45 @@
 #include <iomanip>
 #include <string>
 #include <functional>
+#include <condition_variable>
 
 // Inclusão dos Buffers e Blocos de Execução
 #include "tasks.hpp"
 #include "shared_buffers.hpp"
 #include "NavigationManager.hpp"
 #include "PIDController.hpp"
+
+
+#include <condition_variable> // Adicione esta inclusão no topo
+
+void t_inspecao_camera(SensorBuffer& sensor) {
+    {
+        std::unique_lock<std::mutex> lk(sensor.mtx);
+        sensor.cv_camera.wait(lk, [&]{ return sensor.camera_ativa; });
+    }
+
+    while (true) {
+        const int size = 150;
+        std::vector<std::vector<double>> A(size, std::vector<double>(size, 1.1));
+        std::vector<std::vector<double>> B(size, std::vector<double>(size, 2.2));
+        std::vector<std::vector<double>> C(size, std::vector<double>(size, 0.0));
+
+        for (int i = 0; i < size; ++i) {
+            for (int j = 0; j < size; ++j) {
+                for (int k = 0; k < size; ++k) {
+                    C[i][j] += A[i][k] * B[k][j];
+                }
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(sensor.mtx);
+            sensor.nivel_confianca = C[0][0] / 1000.0; 
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
 
 // Thread responsável por ler os comandos (joystick/botoes) e definir o Setpoint
 // Roda ciclicamente a cada 80ms
