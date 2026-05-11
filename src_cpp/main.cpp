@@ -15,12 +15,10 @@
 #include "PIDController.hpp"
 
 
-#include <condition_variable> // Adicione esta inclusão no topo
-
 void t_inspecao_camera(SensorBuffer& sensor) {
     {
-        std::unique_lock<std::mutex> lk(sensor.mtx);
-        sensor.cv_camera.wait(lk, [&]{ return sensor.camera_ativa; });
+        std::unique_lock<std::mutex> lk(sensor.mtx_camera);
+        sensor.cv_camera.wait(lk, [&]{ return sensor.o_liga_camera; });
     }
 
     while (true) {
@@ -38,8 +36,8 @@ void t_inspecao_camera(SensorBuffer& sensor) {
         }
 
         {
-            std::lock_guard<std::mutex> lock(sensor.mtx);
-            sensor.nivel_confianca = C[0][0] / 1000.0; 
+            std::lock_guard<std::mutex> lock(sensor.mtx_camera);
+            sensor.e_inspecao = (C[0][0] > 1000.0); 
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
