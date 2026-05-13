@@ -9,7 +9,9 @@ SRCS = src_cpp/main.cpp \
        src_cpp/PIDController.cpp \
        src_cpp/tasks.cpp \
        src_cpp/Lidar.cpp \
-       src_cpp/Odometria.cpp
+       src_cpp/Odometria.cpp \
+       src_cpp/Camera.cpp \
+       src_cpp/Coletor.cpp
 
 all: clean $(TARGET)
 

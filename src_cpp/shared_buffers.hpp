@@ -25,7 +25,7 @@ struct NavBuffer {
 // a fila (queue).
 struct Medicao {
     long long timestamp; // Tempo da leitura (ms)
-    int posicao_x;       // Odometria: Posição atual no eixo X
+    int i_encoder;       // Odometria: Posição atual no eixo X
     int i_lidar;       // LIDAR: Distância até o teto
     int nivel_confianca; // Qualidade da medição (0 a 100)
 };

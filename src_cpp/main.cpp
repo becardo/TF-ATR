@@ -13,36 +13,8 @@
 #include "shared_buffers.hpp"
 #include "NavigationManager.hpp"
 #include "PIDController.hpp"
-
-
-void t_inspecao_camera(SensorBuffer& sensor) {
-    {
-        std::unique_lock<std::mutex> lk(sensor.mtx_camera);
-        sensor.cv_camera.wait(lk, [&]{ return sensor.o_liga_camera; });
-    }
-
-    while (true) {
-        const int size = 150;
-        std::vector<std::vector<double>> A(size, std::vector<double>(size, 1.1));
-        std::vector<std::vector<double>> B(size, std::vector<double>(size, 2.2));
-        std::vector<std::vector<double>> C(size, std::vector<double>(size, 0.0));
-
-        for (int i = 0; i < size; ++i) {
-            for (int j = 0; j < size; ++j) {
-                for (int k = 0; k < size; ++k) {
-                    C[i][j] += A[i][k] * B[k][j];
-                }
-            }
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(sensor.mtx_camera);
-            sensor.e_inspecao = (C[0][0] > 1000.0); 
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-}
+#include "Coletor.hpp"
+#include "Camera.hpp"
 
 // Thread responsável por ler os comandos (joystick/botoes) e definir o Setpoint
 // Roda ciclicamente a cada 80ms
@@ -131,102 +103,6 @@ void t_controle_navegacao(NavBuffer& nav) {
 
     timer_PID_nav.async_wait(loop_PID);
     io_PID_nav.run();
-}
-
-/*void t_coletor_dados(SensorBuffer& sensor) {
-    // Configuração do arquivo de saída
-    std::ofstream log_file("telemetria_inspecao.csv", std::ios::app);
-    
-    if (!log_file.is_open()) {
-        std::cerr << "[ERRO] Falha ao abrir o arquivo de log!" << std::endl;
-        return;
-    }
-
-    // Cabeçalho do CSV (opcional, se o arquivo for novo)
-    // log_file << "Timestamp,Posicao_X,Posicao_Y_Teto,Nivel_Confianca\n";
-
-    boost::asio::io_context io_log;
-    // Periodicidade de 100ms para o log (ajustável conforme necessidade)
-    boost::asio::steady_timer timer_log(io_log, boost::asio::chrono::milliseconds(100));
-
-    std::function<void(const boost::system::error_code&)> loop_log;
-
-    loop_log = ([&](const boost::system::error_code& erro) {
-        if (erro) return;
-
-        double x, y, conf;
-        long long ts = std::chrono::system_clock::now().time_since_epoch().count();
-
-        // ----- Zona Crítica: Leitura dos dados dos Buffers -----
-        {
-            std::lock_guard<std::mutex> lock(sensor.mtx);
-            x = sensor.posicao_x;
-            y = sensor.posicao_y_teto;
-            conf = sensor.nivel_confianca;
-        }
-
-        // Gravação otimizada: Escrevemos no buffer do stream
-        // O uso de '\n' em vez de std::endl evita o flush forçado a cada linha, economizando I/O
-        log_file << ts << "," 
-                 << std::fixed << std::setprecision(3) << x << "," 
-                 << y << "," 
-                 << std::setprecision(2) << conf << "\n";
-
-        // Feedback no console para debug (opcional, pode ser removido para performance)
-        // std::cout << "[LOG] Dados gravados em disco.\n";
-
-        timer_log.expires_at(timer_log.expiry() + boost::asio::chrono::milliseconds(100));
-        timer_log.async_wait(loop_log);
-    });
-
-    timer_log.async_wait(loop_log);
-    io_log.run();
-
-    if (log_file.is_open()) {
-        log_file.close();
-    }
-} */
-
-void t_coletor_dados(SensorBuffer& sensor) {
-    std::ofstream log_file("telemetria_inspecao.csv", std::ios::app);
-    
-    if (!log_file.is_open()) {
-        return;
-    }
-
-    boost::asio::io_context io_log;
-    boost::asio::steady_timer timer_log(io_log, boost::asio::chrono::milliseconds(100));
-
-    std::function<void(const boost::system::error_code&)> loop_log;
-
-    loop_log = ([&](const boost::system::error_code& erro) {
-        if (erro) return;
-
-        // ----- Zona Crítica: Consumo da Fila -----
-        std::unique_lock<std::mutex> lock(sensor.mtx_fila); // Trava o mutex específico da fila
-        
-        while(!sensor.fila_medicoes.empty()) { // Varre o buffer preenchido pelos Devs B e C
-            Medicao dado = sensor.fila_medicoes.front(); // Pega o dado mais antigo
-            sensor.fila_medicoes.pop(); // Remove da fila
-
-            // Escrita formatada conforme solicitado
-            log_file << dado.timestamp << "," 
-                     << dado.posicao_x << "," 
-                     << dado.i_lidar << "," 
-                     << dado.nivel_confianca << "\n";
-        }
-        lock.unlock(); // Libera o buffer o mais rápido possível
-
-        timer_log.expires_at(timer_log.expiry() + boost::asio::chrono::milliseconds(100));
-        timer_log.async_wait(loop_log);
-    });
-
-    timer_log.async_wait(loop_log);
-    io_log.run();
-
-    if (log_file.is_open()) {
-        log_file.close();
-    }
 }
 
 int main() {

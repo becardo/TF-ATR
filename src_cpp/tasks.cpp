@@ -32,7 +32,7 @@ void t_calculo_distancia(SensorBuffer& sensor) {
         int dist_x = odo.atualizar(i_encoder);
 
         Medicao m;
-        m.posicao_x = dist_x;
+        m.i_encoder = dist_x;
         m.timestamp = std::chrono::system_clock::now().time_since_epoch().count();
 
         // ----- Zona Crítica: Guardar a leitura na fila -----
@@ -100,58 +100,4 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
 
     timer_lidar.async_wait(loop_lidar);
     io_lidar.run();
-}
-
-// Câmera
-void t_inspecao_camera(SensorBuffer& sensor) {
-    while (true) { 
-        // O uso de 'unique_lock' permite que a thread durma.
-        std::unique_lock<std::mutex> lock_camera(sensor.mtx_camera);
-        
-        // A Câmera dorme. Solução com Predicado.
-        sensor.cv_camera.wait(lock_camera, [&sensor] { 
-            return sensor.e_inspecao; 
-        });
-
-        // Reseta o gatilho para a câmera voltar a dormir
-        sensor.e_inspecao = false;
-        sensor.o_liga_camera = false;
-
-        // Libera o look antes de realizar as outras tarefas
-        lock_camera.unlock();
-
-        /* Inserir lógica "tirar foto" aqui*/
-
-        std::cout << "[CAMERA] Falha detectada! Tirando foto...\n";
-    }
-}
-
-// Coletor de Dados: Consumidor 
-void t_coletor_dados(SensorBuffer& sensor) {
-    /*Instanciar a classe do coletor de dados aqui*/
-
-    while (true) { 
-
-        std::unique_lock<std::mutex> lock_fila(sensor.mtx_fila);
-
-        // Acorda sempre que precisar. O predicado protege contra o despertar "fora de hora".
-        sensor.cv_coletor.wait(lock_fila, [&sensor] { 
-            return !sensor.fila_medicoes.empty(); 
-        });
-        
-        // Esvazia a fila sempre que acorda:
-        while (!sensor.fila_medicoes.empty()) {
-            // Pega o primeiro da fila e apaga
-            Medicao m = sensor.fila_medicoes.front();
-            sensor.fila_medicoes.pop();
-
-            // Destranca para Odometria calcular distância
-            lock_fila.unlock(); 
-            /* Inserir lógica de salvar 'm' no arquivo TVT/CSV */
-            std::cout << "[COLETOR] Salvando medição...\n";
-            lock_fila.lock(); // Tranca novamente para a próxima rodada pegar o próximo dado com segurança.
-
-        } 
-
-    }
 }
