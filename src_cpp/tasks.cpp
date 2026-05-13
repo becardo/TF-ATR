@@ -9,8 +9,7 @@
 #include "Odometria.hpp"
 
 /* 
-Contém as threads responsáveis por ler a odometria, mapear o teto com LIDAR, 
-acionar a câmera em caso de falha e salvar os dados em disco (HD). 
+Contém as threads responsáveis por ler a odometria e mapear o teto com LIDAR
 */
 
 // Odometria: Produtor 
@@ -36,9 +35,12 @@ void t_calculo_distancia(SensorBuffer& sensor) {
         m.timestamp = std::chrono::system_clock::now().time_since_epoch().count();
 
         // ----- Zona Crítica: Guardar a leitura na fila -----
-        sensor.mtx_fila.lock();
-        sensor.fila_medicoes.push(m);
-        sensor.mtx_fila.unlock();
+        {
+            std::lock_guard<std::mutex> lock_fila(sensor.mtx_fila);
+            sensor.fila_medicoes.push(m);
+        }
+
+        sensor.cv_coletor.notify_one();
 
         timer_odo.expires_at(timer_odo.expiry() + boost::asio::chrono::milliseconds(20));
         timer_odo.async_wait(loop_odo);
@@ -85,10 +87,11 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
 
         // Se achou uma falha, aciona o Alarme da Câmera
         if (falha_detectada) {
-            std::unique_lock<std::mutex> lock_camera(sensor.mtx_camera);
-            sensor.e_inspecao = true;      
-            sensor.o_liga_camera = true;  // Manda o comando pra ligar a camera
-            sensor.mtx_camera.unlock();
+            {
+                std::lock_guard<std::mutex> lock_camera(sensor.mtx_camera);
+                sensor.e_inspecao = true;      
+                sensor.o_liga_camera = true;  
+            } 
             
             // Toca o alarme para acordar a thread da Câmera
             sensor.cv_camera.notify_one(); 

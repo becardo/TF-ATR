@@ -45,10 +45,11 @@ void t_comando_navegacao(NavBuffer& nav) {
         nav_manager.processInputs(velocidade_joystick, c_para);
 
         // ----- Zona Crítica: Escrita no Buffer Compartilhado -----
-        nav.mtx.lock(); // Tranca o cadeado antes de mexer na memória
-        nav.e_automatico = (nav_manager.getMode() == NavMode::AUTOMATIC);
-        nav.j_sp_velocidade = static_cast<int>(nav_manager.getTargetSpeed());
-        nav.mtx.unlock(); // Destranca o cadeado após alterar a memória
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            nav.e_automatico = (nav_manager.getMode() == NavMode::AUTOMATIC);
+            nav.j_sp_velocidade = static_cast<int>(nav_manager.getTargetSpeed());
+        }
 
         // Loop de repetição do timer: sempre que o tempo expirar, somam-se 80ms 
         // e o timer é disparado novamente.
@@ -80,9 +81,10 @@ void t_controle_navegacao(NavBuffer& nav) {
         int setpoint_atual = 0;
 
         // --- Zona Crítica: Leitura do Setpoint ---
-        nav.mtx.lock(); // Tranca para ler a velocidade que o robo deve alcançar
-        setpoint_atual = nav.j_sp_velocidade;
-        nav.mtx.unlock(); // Destranca após a leitura
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            setpoint_atual = nav.j_sp_velocidade;
+        }
 
         // Mock da velocidade atual 
         double velocidade_atual_robo = 0.0; 
@@ -93,9 +95,10 @@ void t_controle_navegacao(NavBuffer& nav) {
         std::cout << "[PID] Setpoint: " << setpoint_atual << " | Aceleracao calculada: " << saida_aceleracao << "\n";
         
         // ----- Zona Crítica: Escrita da Aceleração -----
-        nav.mtx.lock(); // Tranca para escrever o resultado
-        nav.o_aceleracao = static_cast<int>(saida_aceleracao);
-        nav.mtx.unlock(); // Destranca
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            nav.o_aceleracao = static_cast<int>(saida_aceleracao);
+        }
 
         timer_PID_nav.expires_at(timer_PID_nav.expiry() + boost::asio::chrono::milliseconds(80));
         timer_PID_nav.async_wait(loop_PID);

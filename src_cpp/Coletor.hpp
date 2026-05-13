@@ -37,7 +37,7 @@ public:
             arquivo << dado.timestamp << "," 
                     << dado.i_encoder << "," 
                     << dado.i_lidar << "," 
-                    << dado.nivel_confianca << "\n";
+                    << dado.nivel_confianca << std::endl;
         }
     }
 };
