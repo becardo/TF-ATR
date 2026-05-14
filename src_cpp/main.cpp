@@ -18,31 +18,39 @@
 
 // Thread responsável por ler os comandos (joystick/botoes) e definir o Setpoint
 // Roda ciclicamente a cada 80ms
-void t_comando_navegacao(NavBuffer& nav) {
+// ADICIONADO: Agora recebe também o SensorBuffer para verificar o slowDown
+void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     NavigationManager nav_manager; 
 
-    boost::asio::io_context io_com_nav; // Maestro para gerenciar os eventos da thread do Comando de Navegação.
+    boost::asio::io_context io_com_nav;
     boost::asio::steady_timer timer_com_nav(io_com_nav, boost::asio::chrono::milliseconds(80)); 
 
-    // Função apara chamar o loop a ser executado
     std::function<void(const boost::system::error_code&)> loop_comando;
 
-    // Função que o timer executa quando "toca"
     loop_comando = ([&](const boost::system::error_code& erro){
 
         if(erro) return;
 
         // ----- Mock de entradas -----
-        // (Serão substítuidos posteriormente por leiturais reais, via interface/MQTT a ser desenvolvida)
-        bool c_automatico = false; // Comando para passar para o modo automático
-        bool c_man = true;         // Comando para passar para o modo manual
-        bool c_para = false;       // Comando para parar o robô
+        bool c_automatico = false; 
+        bool c_man = true;         
+        bool c_para = false;       
 
-        double velocidade_joystick = 30.0; // Simulação do sinal vindo do joystick para o Setpoint
+        double velocidade_joystick = 30.0; 
+
+        // ----- NOVO: Lógica de Inspeção (Slowdown) -----
+        bool em_inspecao = false;
+        {
+            // Bloqueia o mutex da câmera apenas para ler a flag
+            std::lock_guard<std::mutex> lock(sensor.mtx_camera);
+            em_inspecao = sensor.e_inspecao;
+        }
 
         // Processamento da lógica de estado da navegação
         nav_manager.updateMode(c_automatico, c_man);
-        nav_manager.processInputs(velocidade_joystick, c_para);
+        
+        // MUDANÇA: Agora passamos a flag em_inspecao como o novo parâmetro slowDown
+        nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);
 
         // ----- Zona Crítica: Escrita no Buffer Compartilhado -----
         {
@@ -51,22 +59,16 @@ void t_comando_navegacao(NavBuffer& nav) {
             nav.j_sp_velocidade = static_cast<int>(nav_manager.getTargetSpeed());
         }
 
-        // Loop de repetição do timer: sempre que o tempo expirar, somam-se 80ms 
-        // e o timer é disparado novamente.
         timer_com_nav.expires_at(timer_com_nav.expiry() + boost::asio::chrono::milliseconds(80));
         timer_com_nav.async_wait(loop_comando);
     });
 
-    // Gatilho de início da contagem: 80ms
     timer_com_nav.async_wait(loop_comando);
     io_com_nav.run();
-
 }
 
-// Thread responsável pelo controle PID
-// Roda ciclicamente a cada 80ms 
+// Thread responsável pelo controle PID (Sem mudanças aqui)
 void t_controle_navegacao(NavBuffer& nav) {
-    // Kp, Ki, Kd iniciais e tempo de amostragem de 80ms (0.08)
     PIDController pid(1.0, 0.1, 0.05, 0.08);
 
     boost::asio::io_context io_PID_nav;
@@ -75,26 +77,19 @@ void t_controle_navegacao(NavBuffer& nav) {
     std::function<void(const boost::system::error_code&)> loop_PID;
 
     loop_PID = ([&](const boost::system::error_code& erro){
-
         if(erro) return;
 
         int setpoint_atual = 0;
-
-        // --- Zona Crítica: Leitura do Setpoint ---
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
             setpoint_atual = nav.j_sp_velocidade;
         }
 
-        // Mock da velocidade atual 
         double velocidade_atual_robo = 0.0; 
-
-        // Calcula o PID fora da Zona Crítica, para não travar o sistema durante o cálculo
         double saida_aceleracao = pid.compute(static_cast<double>(setpoint_atual), velocidade_atual_robo);
 
         std::cout << "[PID] Setpoint: " << setpoint_atual << " | Aceleracao calculada: " << saida_aceleracao << "\n";
         
-        // ----- Zona Crítica: Escrita da Aceleração -----
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
             nav.o_aceleracao = static_cast<int>(saida_aceleracao);
@@ -114,15 +109,15 @@ int main() {
     NavBuffer nav;
     SensorBuffer sensor;
 
-    // Dispara as 6 threads passando a referência da memória
-    std::thread th_comando(t_comando_navegacao, std::ref(nav));
+    // MUDANÇA: th_comando agora recebe std::ref(nav) E std::ref(sensor)
+    std::thread th_comando(t_comando_navegacao, std::ref(nav), std::ref(sensor));
+    
     std::thread th_controle(t_controle_navegacao, std::ref(nav));
     std::thread th_distancia(t_calculo_distancia, std::ref(sensor));
     std::thread th_teto(t_reconstrucao_teto, std::ref(sensor));
     std::thread th_camera(t_inspecao_camera, std::ref(sensor));
     std::thread th_coletor(t_coletor_dados, std::ref(sensor));
 
-    // Aguarda execução infinita
     th_comando.join();
     th_controle.join();
     th_distancia.join();

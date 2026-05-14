@@ -13,10 +13,10 @@ public:
     
     void updateMode(bool cmdAuto, bool cmdMan);
     
-    void processInputs(double joystickSpeed, bool btnStop);
+    void processInputs(double joystickSpeed, bool btnStop, bool slowDown);
 
-    NavMode getMode() const { return currentMode; }
-    double getTargetSpeed() const { return targetSpeed; }
+    NavMode getMode() const;
+    double getTargetSpeed() const;
 };
 
 #endif
