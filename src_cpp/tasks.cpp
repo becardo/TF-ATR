@@ -34,6 +34,8 @@ void t_calculo_distancia(SensorBuffer& sensor) {
         m.i_encoder = dist_x;
         m.timestamp = std::chrono::system_clock::now().time_since_epoch().count();
 
+        m.i_lidar = sensor.ultima_leitura_lidar;
+
         // ----- Zona Crítica: Guardar a leitura na fila -----
         {
             std::lock_guard<std::mutex> lock_fila(sensor.mtx_fila);
@@ -71,6 +73,8 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
         if(erro) return;
 
         float media = filtro.calcular(valor_simulado);
+
+        sensor.ultima_leitura_lidar = static_cast<int>(media);
 
         bool falha_detectada = false;
 
