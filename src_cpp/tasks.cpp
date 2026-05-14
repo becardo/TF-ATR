@@ -2,6 +2,9 @@
 #include <thread>
 #include <chrono>
 #include <boost/asio.hpp>
+#include <fstream>
+#include <string>
+#include <vector>
 
 #include "tasks.hpp"
 #include "shared_buffers.hpp"
@@ -56,13 +59,35 @@ void t_calculo_distancia(SensorBuffer& sensor) {
 void t_reconstrucao_teto(SensorBuffer& sensor) {
     LidarFilter filtro(5); // Instancia da classe LIDAR
 
-    int valor_simulado = 40; // Futuro lidar.ler_distancia()
+    //int valor_simulado = 10; // Futuro lidar.ler_distancia()
     for(int i = 0; i < 5; i++) {
-        filtro.calcular(valor_simulado);
+        filtro.calcular(10);
     }
 
-    float altura_ideal = 30.0; // Ajustar conforme necessário
-    float margem_erro = 1.0; // Variações toleráveis na altura: tentativa de aproximar mais o problema da realidade.
+    float altura_ideal = 10.0; // Ajustar conforme necessário
+    float margem_erro = 0.5; // Variações toleráveis na altura: tentativa de aproximar mais o problema da realidade.
+
+    // --- NOVA LEITURA DO SEU ARQUIVO CSV ---
+    std::vector<float> valores_teste;
+    std::ifstream arquivo_teto("simulacao_superficie.csv"); // Lendo o seu arquivo!
+    std::string linha;
+
+    if (arquivo_teto.is_open()) {
+        while (std::getline(arquivo_teto, linha)) {
+            try {
+                valores_teste.push_back(std::stof(linha)); // Transforma o texto em float
+            } catch (...) {
+                // Ignora linhas vazias ou cabeçalhos
+            }
+        }
+        arquivo_teto.close();
+        std::cout << "[SISTEMA] Arquivo simulacao_superficie.csv carregado com " << valores_teste.size() << " leituras.\n";
+    } else {
+        std::cerr << "[ERRO] Nao achou simulacao_superficie.csv! Usando 10.0 fixo.\n";
+        valores_teste = {10.0}; 
+    }
+
+    int indice_teste = 0; // Controlador de qual linha do CSV estamos lendo
 
     boost::asio::io_context io_lidar;
     boost::asio::steady_timer timer_lidar(io_lidar, boost::asio::chrono::milliseconds(100));
@@ -72,9 +97,11 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
     loop_lidar = ([&](const boost::system::error_code& erro){ 
         if(erro) return;
 
-        float media = filtro.calcular(valor_simulado);
+        float valor_atual = valores_teste[indice_teste];
+        indice_teste = (indice_teste + 1) % valores_teste.size(); // garante que quando o arquivo chegar no final, inicie novamente do começo
 
-        sensor.ultima_leitura_lidar = static_cast<int>(media);
+        float media = filtro.calcular(valor_atual);
+        sensor.ultima_leitura_lidar = media;
 
         bool falha_detectada = false;
 

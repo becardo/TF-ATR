@@ -1,6 +1,7 @@
 #ifndef COLETOR_HPP
 #define COLETOR_HPP
 
+#include <iomanip>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -36,8 +37,8 @@ public:
         if (arquivo.is_open()) {
             arquivo << dado.timestamp << "," 
                     << dado.i_encoder << "," 
-                    << dado.i_lidar << "," 
-                    << dado.nivel_confianca << std::endl;
+                    << std::fixed << std::setprecision(2) << dado.i_lidar << "," 
+                    << std::fixed << std::setprecision(2) << dado.nivel_confianca << std::endl;
         }
     }
 };

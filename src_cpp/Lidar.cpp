@@ -15,7 +15,7 @@
 LidarFilter::LidarFilter(int size) : buffer(size, 0), window_size(size) {}
 
 // Buffer Circular 
-float LidarFilter::calcular(int nova_leitura) {
+float LidarFilter::calcular(float nova_leitura) {
 
     // Substitui a leitura mais velha pela mais nova.
     buffer[head] = nova_leitura;

@@ -26,7 +26,7 @@ struct NavBuffer {
 struct Medicao {
     long long timestamp = 0; // Tempo da leitura (ms)
     int i_encoder = 0;       // Odometria: Posição atual no eixo X
-    int i_lidar = 0;       // LIDAR: Distância até o teto
+    float i_lidar = 0.0;       // LIDAR: Distância até o teto
     double nivel_confianca = 0; // Qualidade da medição (0 a 100)
 };
 
@@ -49,7 +49,7 @@ struct SensorBuffer {
     bool o_liga_camera = false;
     std::condition_variable cv_camera; // O alarme da câmera
 
-    int ultima_leitura_lidar = 30;
+    float ultima_leitura_lidar = 10.0;
 };
 
 #endif
