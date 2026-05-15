@@ -16,7 +16,6 @@ int Odometria::atualizar(bool sinal_encoder) {
     // garante contagem única apenas na exata transição de 0 para 1.
     if (sinal_encoder && !estado_anterior) {
         distancia_total_x++; // Soma 1 metro
-        std::cout << "[ODOMETRIA]: Distancia percorrida: " << distancia_total_x << "\n";
     }
 
     // Atualiza memória

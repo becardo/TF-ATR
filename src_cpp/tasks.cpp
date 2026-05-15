@@ -60,6 +60,11 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
         // A Mágica da Derivada: Velocidade = Delta S / Delta T
         double variacao_distancia = dist_x - distancia_anterior;
         double velocidade_medida = variacao_distancia / dt;
+
+        if (dist_x != distancia_anterior) {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[ODOMETRIA]: Distancia percorrida: " << dist_x << " m\n";
+        }
         
         // Atualiza a memória para o próximo ciclo de 20ms
         distancia_anterior = dist_x;
