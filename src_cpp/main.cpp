@@ -36,7 +36,7 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         bool c_man = true;         
         bool c_para = false;       
 
-        double velocidade_joystick = 30.0; 
+        double velocidade_joystick = 5.0; 
 
         // ----- NOVO: Lógica de Inspeção (Slowdown) -----
         bool em_inspecao = false;
@@ -56,7 +56,7 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
             nav.e_automatico = (nav_manager.getMode() == NavMode::AUTOMATIC);
-            nav.j_sp_velocidade = static_cast<int>(nav_manager.getTargetSpeed());
+            nav.j_sp_velocidade = nav_manager.getTargetSpeed();
         }
 
         timer_com_nav.expires_at(timer_com_nav.expiry() + boost::asio::chrono::milliseconds(80));
@@ -79,7 +79,7 @@ void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     loop_PID = ([&](const boost::system::error_code& erro){
         if(erro) return;
 
-        int setpoint_atual = 0;
+        float setpoint_atual = 0.0;
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
             setpoint_atual = nav.j_sp_velocidade;
@@ -96,12 +96,12 @@ void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
 
         {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cout << "[PID] Setpoint: " << setpoint_atual << " | Aceleracao calculada: " << saida_aceleracao << "\n";
+            std::cout << "[PID] Setpoint: " << setpoint_atual << " m/s | Aceleracao calculada: " << saida_aceleracao << " m/s²\n";
         }
         
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
-            nav.o_aceleracao = static_cast<int>(saida_aceleracao);
+            nav.o_aceleracao = saida_aceleracao;
         }
 
         timer_PID_nav.expires_at(timer_PID_nav.expiry() + boost::asio::chrono::milliseconds(80));

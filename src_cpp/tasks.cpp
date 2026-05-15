@@ -37,11 +37,7 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     loop_odo = ([&](const boost::system::error_code& erro) { 
         if(erro) return;
 
-        // ======================== COMEÇO GEMINI ============================
-        // 1. INTEGRAÇÃO (A Física: Freando o robô no mundo real)
-        // =========================================================
-        // Lê a aceleração do PID (Nota: se o seu PID escreve no NavBuffer, 
-        // mude aqui para nav.o_aceleracao e passe o nav nos parâmetros da função)
+        // Freando o robô no mundo real - Integração
         double aceleracao = nav.o_aceleracao * 0.1; 
 
         velocidade_fisica += aceleracao * dt;
@@ -49,7 +45,7 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
         
         posicao_fisica += velocidade_fisica * dt;
 
-        // GEMINI - Simulação: O encoder agora SÓ vira quando a física acumula 1 metro
+        // Encoder só vira quando acumula 1 metro
         if ((int)posicao_fisica > ultimo_metro_inteiro) {
             pulso_fisico_encoder = !pulso_fisico_encoder;
             ultimo_metro_inteiro = (int)posicao_fisica;
@@ -57,11 +53,12 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
 
         int dist_x = odo.atualizar(pulso_fisico_encoder);
 
-        // A Mágica da Derivada: Velocidade = Delta S / Delta T
+        // Derivação para encontrar a velocidade
         double variacao_distancia = dist_x - distancia_anterior;
         double velocidade_medida = variacao_distancia / dt;
 
-        if (dist_x != distancia_anterior) {
+        //if (dist_x != distancia_anterior) 
+        {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
             std::cout << "[ODOMETRIA]: Distancia percorrida: " << dist_x << " m\n";
         }
@@ -69,10 +66,8 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
         // Atualiza a memória para o próximo ciclo de 20ms
         distancia_anterior = dist_x;
 
-        // Guarda a velocidade medida no buffer para a thread do PID ler!
+        // Guarda a velocidade medida no buffer para a thread do PID ler
         sensor.velocidade_real_medida = velocidade_medida;
-
-        // ======================= FIM GEMINI =======================
 
         Medicao m;
         m.i_encoder = dist_x;
@@ -176,7 +171,7 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
         if (media > (altura_ideal + margem_erro)){
             {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cout << "[LIDAR] FALHA: BURACO detectado! (Dist: " << media << ")\n";
+            std::cout << "[LIDAR] FALHA: BURACO detectado! (Dist/Altura: " << media << "m)\n";
             }
             
             falha_detectada = true;
@@ -184,7 +179,7 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
         else if(media < (altura_ideal - margem_erro)){
             {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cout << "[LIDAR] FALHA: SALIENCIA detectada! (Dist: " << media << ")\n";
+            std::cout << "[LIDAR] FALHA: SALIENCIA detectada! (Dist/Altura: " << media << "m)\n";
             }
             
             falha_detectada = true;

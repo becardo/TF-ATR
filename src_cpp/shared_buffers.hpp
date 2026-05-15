@@ -17,8 +17,8 @@ inline std::mutex mtx_console;
 // Armazena os dados de troca entre os comandos do usuário e o controle PID
 // do robo. Protegida por MUTEX para evitar Condição de Corrida.
 struct NavBuffer {
-    int j_sp_velocidade = 0; // Velocidade alvo solicitada (cm/s)
-    int o_aceleracao = 0;          // Esforço do controle calculado pelo PID
+    double j_sp_velocidade = 0.0; // Velocidade alvo solicitada (m/s)
+    double o_aceleracao = 0.0;          // Esforço do controle calculado pelo PID
     bool e_automatico = false;// Estado de operação (Manual ou Auto)
     std::mutex mtx;              // O cadeado do PID
 };
