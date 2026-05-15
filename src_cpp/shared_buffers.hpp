@@ -11,6 +11,8 @@ a comunicação segura entre as múltiplas threads do sistema. Garante a
 exclusão mútua nas zonas críticas, evitando condições de corrida.
 */
 
+inline std::mutex mtx_console;
+
 // Buffer de Comando e Navegação
 // Armazena os dados de troca entre os comandos do usuário e o controle PID
 // do robo. Protegida por MUTEX para evitar Condição de Corrida.
@@ -38,6 +40,8 @@ struct SensorBuffer {
     std::queue<Medicao> fila_medicoes; 
     std::mutex mtx_fila; // Cadeado para a inserção e remição da fila
 
+    std::mutex mtx_leituras;
+
     // Variável de condição para o Coletor de Dados.
     std::condition_variable cv_coletor;
 
@@ -50,6 +54,9 @@ struct SensorBuffer {
     std::condition_variable cv_camera; // O alarme da câmera
 
     float ultima_leitura_lidar = 10.0;
+
+    // Variável para compartilhar com o PID
+    double velocidade_real_medida = 0.0;
 };
 
 #endif

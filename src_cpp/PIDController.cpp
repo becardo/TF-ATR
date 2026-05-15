@@ -9,7 +9,7 @@
 // dt(sample_time): tempo de amostragem (Delta T).
 // output_limit(100.0): PWM de 100%
 PIDController::PIDController(double kp, double ki, double kd, double sample_time)
-    : Kp(kp), Ki(ki), Kd(kd), integral(0.0), dt(sample_time), last_error(0.0), output_limit(100.0) {}
+    : Kp(kp), Ki(ki), Kd(kd), integral(0.0), last_error(0.0), dt(sample_time), output_limit(100.0) {}
 
 // Permite troca de parâmetros P, I e D com o robô em funcionamento.
 void PIDController::setGains(double kp, double ki, double kd) {

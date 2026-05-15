@@ -68,7 +68,7 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
 }
 
 // Thread responsável pelo controle PID (Sem mudanças aqui)
-void t_controle_navegacao(NavBuffer& nav) {
+void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     PIDController pid(1.0, 0.1, 0.05, 0.08);
 
     boost::asio::io_context io_PID_nav;
@@ -85,10 +85,19 @@ void t_controle_navegacao(NavBuffer& nav) {
             setpoint_atual = nav.j_sp_velocidade;
         }
 
-        double velocidade_atual_robo = 0.0; 
+        double velocidade_atual_robo = 0.0;
+        {
+            // Tranca a porta só para ler a velocidade com segurança
+            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+            velocidade_atual_robo = sensor.velocidade_real_medida;
+        }
+
         double saida_aceleracao = pid.compute(static_cast<double>(setpoint_atual), velocidade_atual_robo);
 
-        std::cout << "[PID] Setpoint: " << setpoint_atual << " | Aceleracao calculada: " << saida_aceleracao << "\n";
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[PID] Setpoint: " << setpoint_atual << " | Aceleracao calculada: " << saida_aceleracao << "\n";
+        }
         
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
@@ -112,8 +121,8 @@ int main() {
     // MUDANÇA: th_comando agora recebe std::ref(nav) E std::ref(sensor)
     std::thread th_comando(t_comando_navegacao, std::ref(nav), std::ref(sensor));
     
-    std::thread th_controle(t_controle_navegacao, std::ref(nav));
-    std::thread th_distancia(t_calculo_distancia, std::ref(sensor));
+    std::thread th_controle(t_controle_navegacao, std::ref(nav), std::ref(sensor));
+    std::thread th_distancia(t_calculo_distancia, std::ref(nav), std::ref(sensor));
     std::thread th_teto(t_reconstrucao_teto, std::ref(sensor));
     std::thread th_camera(t_inspecao_camera, std::ref(sensor));
     std::thread th_coletor(t_coletor_dados, std::ref(sensor));

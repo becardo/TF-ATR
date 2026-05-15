@@ -16,8 +16,18 @@
 */
 
 // --- Odometria: Produtor de dados de distância ---
-void t_calculo_distancia(SensorBuffer& sensor) {
+void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     Odometria odo; 
+
+    // === VARIÁVEIS DA FÍSICA E DA DERIVADA - GEMINI===
+    double velocidade_fisica = 0.0;
+    double posicao_fisica = 0.0;
+    int ultimo_metro_inteiro = 0;
+    int distancia_anterior = 0;
+    double dt = 0.02; // 20ms do timer
+
+    // VARIÁVEL LOCAL - GEMINI
+    bool pulso_fisico_encoder = false;
 
     boost::asio::io_context io_odo;
     boost::asio::steady_timer timer_odo(io_odo, boost::asio::chrono::milliseconds(20));
@@ -27,18 +37,51 @@ void t_calculo_distancia(SensorBuffer& sensor) {
     loop_odo = ([&](const boost::system::error_code& erro) { 
         if(erro) return;
 
-        // Simulação: alternando sinal do encoder para contagem
-        static bool i_encoder = false;
-        i_encoder = !i_encoder; 
+        // ======================== COMEÇO GEMINI ============================
+        // 1. INTEGRAÇÃO (A Física: Freando o robô no mundo real)
+        // =========================================================
+        // Lê a aceleração do PID (Nota: se o seu PID escreve no NavBuffer, 
+        // mude aqui para nav.o_aceleracao e passe o nav nos parâmetros da função)
+        double aceleracao = nav.o_aceleracao * 0.1; 
 
-        int dist_x = odo.atualizar(i_encoder);
+        velocidade_fisica += aceleracao * dt;
+        if(velocidade_fisica < 0.0) velocidade_fisica = 0.0; // Impede o robô de dar ré
+        
+        posicao_fisica += velocidade_fisica * dt;
+
+        // GEMINI - Simulação: O encoder agora SÓ vira quando a física acumula 1 metro
+        if ((int)posicao_fisica > ultimo_metro_inteiro) {
+            pulso_fisico_encoder = !pulso_fisico_encoder;
+            ultimo_metro_inteiro = (int)posicao_fisica;
+        }
+
+        int dist_x = odo.atualizar(pulso_fisico_encoder);
+
+        // A Mágica da Derivada: Velocidade = Delta S / Delta T
+        double variacao_distancia = dist_x - distancia_anterior;
+        double velocidade_medida = variacao_distancia / dt;
+        
+        // Atualiza a memória para o próximo ciclo de 20ms
+        distancia_anterior = dist_x;
+
+        // Guarda a velocidade medida no buffer para a thread do PID ler!
+        sensor.velocidade_real_medida = velocidade_medida;
+
+        // ======================= FIM GEMINI =======================
 
         Medicao m;
         m.i_encoder = dist_x;
         // Timestamp simples para o coletor
         m.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        m.i_lidar = static_cast<int>(sensor.ultima_leitura_lidar);
+        m.i_lidar = sensor.ultima_leitura_lidar;
         m.nivel_confianca = 100; // Valor padrão inicial
+
+        {
+            // Tranca a porta para escrever a velocidade e ler o Lidar com segurança
+            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+            sensor.velocidade_real_medida = velocidade_medida;
+            m.i_lidar = sensor.ultima_leitura_lidar; 
+        }
 
         // ----- Zona Crítica: Guardar na fila para o Coletor -----
         {
@@ -76,12 +119,20 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
             } catch (...) { }
         }
         arquivo_teto.close();
-        std::cout << "[SISTEMA] Arquivo simulacao_superficie.csv carregado com " << valores_teste.size() << " leituras.\n";
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[SISTEMA] Arquivo simulacao_superficie.csv carregado com " << valores_teste.size() << " leituras.\n";
+        }
+        
     }
 
     // Proteção: Se o arquivo falhou ou está vazio, garante que o programa não dê crash
     if (valores_teste.empty()) {
-        std::cerr << "[AVISO] Arquivo de simulacao vazio ou nao encontrado. Usando teto plano.\n";
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cerr << "[AVISO] Arquivo de simulacao vazio ou nao encontrado. Usando teto plano.\n";
+        }
+        
         valores_teste.push_back(10.0f);
     }
 
@@ -99,7 +150,18 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
         indice_teste = (indice_teste + 1) % valores_teste.size();
 
         float media = filtro.calcular(valor_atual);
-        sensor.ultima_leitura_lidar = media;
+
+        // PROTEÇÃO DE MEMÓRIA: Tranca a porta para atualizar o SensorBuffer
+        {
+            std::lock_guard<std::mutex> lock_memoria(sensor.mtx_leituras);
+            sensor.ultima_leitura_lidar = media;
+        }
+
+        // PROTEÇÃO DE TELA: Imprime a medida atual para o usuário ver
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[LIDAR] Medida atual: " << media << " m\n";
+        }
 
         bool falha_detectada = false;
         float altura_ideal = 10.0f;
@@ -107,11 +169,19 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
 
         // Lógica de Detecção
         if (media > (altura_ideal + margem_erro)){
+            {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
             std::cout << "[LIDAR] FALHA: BURACO detectado! (Dist: " << media << ")\n";
+            }
+            
             falha_detectada = true;
         }
         else if(media < (altura_ideal - margem_erro)){
+            {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
             std::cout << "[LIDAR] FALHA: SALIENCIA detectada! (Dist: " << media << ")\n";
+            }
+            
             falha_detectada = true;
         }
 

@@ -28,7 +28,7 @@ float LidarFilter::calcular(float nova_leitura) {
     float soma = std::accumulate(buffer.begin(), buffer.end(), 0.0);
 
     ultima_media = soma / window_size;
-    std::cout << "[LIDAR] Medida atual: " << ultima_media << "\n";
+    
     return ultima_media;
 }
 

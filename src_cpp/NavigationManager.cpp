@@ -23,9 +23,9 @@ void NavigationManager::processInputs(double joystickSpeed, bool btnStop, bool s
     }
 
     // 2. Lógica de Inspeção (slowDown): Se a câmera estiver processando,
-    // a velocidade cai para um valor baixo (ex: 1.0) para garantir a qualidade.
+    // a velocidade cai para um valor baixo (ex: 0.2) para garantir a qualidade.
     if (slowDown) {
-        targetSpeed = 1.0; 
+        targetSpeed = 0.2; 
     } 
     else {
         // 3. Operação Normal
@@ -33,8 +33,8 @@ void NavigationManager::processInputs(double joystickSpeed, bool btnStop, bool s
             // Velocidade vem do controle joystick
             targetSpeed = joystickSpeed;
         } else {
-            // Velocidade automática nominal: 5.0
-            targetSpeed = 5.0; 
+            // Velocidade automática nominal: 1.0
+            targetSpeed = 1.0; 
         }
     }
 }

@@ -9,7 +9,7 @@ void processamento_pesado_ia() {
     double resultado = 0.0;
     // Ajustei o número de iterações para chegar perto dos 30-40ms em CPUs modernas
     // Se ficar rápido demais no seu PC, aumente para 2000000
-    for (int i = 0; i < 1200000; ++i) {
+    for (int i = 0; i < 1500000; ++i) {
         resultado += std::sin(i) * std::cos(i) * std::tan(i);
     }
     
@@ -28,7 +28,10 @@ void t_inspecao_camera(SensorBuffer& sensor) {
             return sensor.o_liga_camera; 
         });
 
-        std::cout << "[CAMERA] Falha detectada! Iniciando processamento de IA...\n";
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[CAMERA] Falha detectada! Iniciando processamento de IA...\n";
+        }
 
         // 3. LIBERA O LOCK durante o processamento pesado
         // Isso é CRITICAL em ATR para permitir que a thread de comando 
@@ -44,7 +47,10 @@ void t_inspecao_camera(SensorBuffer& sensor) {
         // 4. BLOQUEIA novamente para resetar as flags de estado
         lock.lock();
         
-        std::cout << "[CAMERA] Inspecao concluida em " << elapsed.count() << " ms.\n";
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[CAMERA] Inspecao concluida em " << elapsed.count() << " ms.\n";
+        }
 
         // RESET DAS FLAGS: Aqui o robô recebe permissão para voltar a 5.0
         sensor.o_liga_camera = false;
