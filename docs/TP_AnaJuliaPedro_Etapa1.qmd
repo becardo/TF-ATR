@@ -16,13 +16,146 @@ format:
 ---
 
 # Introdução
+O monitoramento e a manutenção preventiva de infraestruturas críticas subterrâneas, como túneis rodoviários e metroviários, apresentam desafios severos de segurança operacional e eficiência de inspeção. Tradicionalmente, a identificação de anomalias estruturais — tais como falhas na superfície do teto, infiltrações ou deformações geométricas — depende de inspeções visuais manuais intermitentes, as quais expõem os operadores a ambientes de risco e demandam a interrupção prolongada do tráfego.
 
+Para mitigar essas limitações, o presente trabalho aborda o desenvolvimento de um sistema computacional concorrente embarcado para o controle e telemetria de um robô de inspeção autônoma de túneis. O problema central consiste em gerenciar, em tempo real, a concorrência e a sincronização de tarefas com diferentes restrições temporais (deadlines), divididas essencialmente em duas frentes integradas:
+
+Controle Dinâmico de Navegação: A execução de algoritmos de comando e controle em malha fechada (PID) que devem responder deterministicamente a uma frequência fixa para garantir a estabilidade cinemática do veículo.
+
+Percepção e Inspeção Reativa: O processamento assíncrono de dados volumosos provenientes de sensores de varredura (LIDAR) e sistemas de visão artificial (IA por Câmera), que exigem uma redução coordenada na velocidade do robô (slowdown) ao detectarem variações geométricas severas no teto para viabilizar registros fotográficos precisos.
+
+Dessa forma, a arquitetura do software deve ser estruturada para mitigar condições de corrida (race conditions) no acesso aos buffers de memória compartilhada e evitar o desperdício de ciclos de processamento da CPU, utilizando primitivas rigorosas de exclusão mútua (mutexes) e sincronização orientada a eventos (variáveis de condição).
 
 
 # Proposta da Arquitetura
 
+A arquitetura do sistema foi concebida segundo o princípio de separação clara entre **simulação/operador** e **controle embarcado concorrente**, interligados por comunicação assíncrona baseada em mensagens. O objetivo é garantir determinismo nas tarefas críticas de controle e, simultaneamente, flexibilidade para tarefas de percepção e inspeção.
 
+O sistema é dividido em dois processos principais que executam em paralelo.
 
+## Visão Geral dos Processos
+
+A solução é estruturada em dois blocos principais:
+
+**Front-End (Python)**  
+Responsável pela simulação, interface com o operador e geração dos dados sensoriais.
+
+**Back-End (C++)**  
+Responsável pelo controle embarcado concorrente, processamento de sensores e persistência de dados.
+
+A comunicação entre os processos é realizada por meio de um modelo **Publish/Subscribe**, permitindo desacoplamento entre simulação e controle.
+
+---
+
+## Front-End — Simulação e Interface do Operador
+
+O processo Front-End é implementado em Python utilizando Pygame e Pandas. Ele possui três responsabilidades principais:
+
+- Simulação da navegação do robô no túnel  
+- Renderização dos sensores (LIDAR, câmera e encoders)  
+- Interação com o operador remoto  
+
+A interface gráfica permite o envio de comandos de operação e a visualização em tempo real da telemetria do sistema.
+
+Os dados produzidos pelo Front-End são publicados via Pub/Sub e consumidos pelo processo embarcado.
+
+---
+
+## Back-End — Controle Embarcado Concorrente
+
+O Back-End é implementado em C++ utilizando:
+
+- `std::thread` para concorrência  
+- `Boost.Asio` para timers e comunicação assíncrona  
+
+Este processo é composto por seis threads concorrentes com diferentes requisitos temporais.
+
+### Threads Cíclicas de Tempo Real
+
+#### Thread de Comando de Navegação — 80 ms
+Responsável por definir as diretrizes de movimento do robô.
+
+Escreve no **NavBuffer**:
+- setpoint de velocidade (`j_sp_velocidade`)
+- modo de operação (`e_automatico`)
+
+Também consulta o estado de inspeção para reduzir a velocidade quando necessário.
+
+---
+
+#### Thread de Controle de Navegação — 80 ms
+Implementa a malha fechada de controle PID.
+
+Operações principais:
+- Lê velocidade real medida
+- Lê setpoint de velocidade
+- Calcula erro e gera esforço de aceleração (`o_aceleracao`)
+- Atualiza o NavBuffer
+
+Essa thread garante estabilidade dinâmica e resposta determinística do veículo.
+
+---
+
+#### Thread de Cálculo de Distância — 20 ms
+Thread de maior frequência do sistema.
+
+Responsável por:
+- Processar odometria
+- Atualizar velocidade real medida
+
+Os dados são armazenados no SensorBuffer com proteção por mutex.
+
+---
+
+#### Thread de Reconstrução do Teto — 100 ms
+Processa leituras do LIDAR para detectar anomalias geométricas no teto do túnel.
+
+Ao identificar falhas severas:
+- Atualiza a flag `e_inspecao`
+- Dispara a variável de condição **cv_camera**
+
+Isso ativa a inspeção visual sob demanda.
+
+---
+
+### Threads Reativas (Aperiódicas)
+
+#### Thread de Inspeção por Câmera
+Permanece suspensa até receber sinal da reconstrução do teto.
+
+Fluxo:
+1. Aguarda em `cv_camera.wait()`
+2. Ao ser acordada, executa algoritmos de visão computacional
+3. Gera dados estruturados de inspeção
+
+---
+
+#### Thread Coletora de Dados
+Responsável pela persistência de dados no disco.
+
+Fluxo:
+1. Aguarda em `cv_coletor.wait()`
+2. Consome dados da fila compartilhada
+3. Grava no arquivo **telemetria_inspecao.csv**
+
+Essa separação evita bloqueios nas threads críticas de controle.
+
+---
+
+## Comunicação Entre Threads — Memória Compartilhada
+
+Para reduzir condições de corrida, a memória foi segmentada em buffers especializados com granularidade fina.
+
+### NavBuffer — Dados de Navegação
+
+Contém:
+- `j_sp_velocidade`
+- `o_aceleracao`
+- `e_automatico`
+
+Proteção:
+```cpp
+mutex nav.mtx;
 ## Sincronização e Buffers
 
 ## APIs e Gerenciamento das Tarefas Cíclicas
