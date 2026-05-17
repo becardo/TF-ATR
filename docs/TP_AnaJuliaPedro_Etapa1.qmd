@@ -1,37 +1,964 @@
 ---
-title: "Sistema de Inspeção Autônoma de Túneis"
+title: "Sistema Automatizado de Inspeção de Túneis"
+subtitle: "Trabalho Final - Automação em Tempo Real - Etapa 1"
 author: 
-  - "Ana Beatriz Soares Cardoso"
-  - "Julia Pereira Maia Ribeiro"
-  - "Pedro Eduardo Alvino Tapia"
-format: pdf
-toc: true
-number-sections: true
+  - name: Ana Beatriz Soares Cardoso - 2022108170
+  - name: Julia Pereira Maia Ribeiro - 
+  - name: Pedro Eduardo Alvino Tapia - 
+institute: "Universidade Federal de Minas Gerais (UFMG) - Engenharia de Controle e Automação"
+date: today
+date-format: "2026"
+format: 
+  pdf:
+    toc: true 
+    number-sections: true
+    colorlinks: true
 ---
 
 # Introdução
 
-Este trabalho apresenta o desenvolvimento de um sistema de inspeção automática de túneis utilizando conceitos de sistemas em tempo real.
 
-# Objetivos
 
-- Implementar um sistema multitarefa
-- Simular sensores e atuadores
-- Aplicar sincronização entre tarefas
-- Integrar comunicação via MQTT
+# Proposta da Arquitetura
 
-# Arquitetura do Sistema
 
-Descreva aqui a arquitetura geral do sistema.
 
-# Implementação
+## Sincronização e Buffers
 
-## Exemplo de código C++
+## APIs e Gerenciamento das Tarefas Cíclicas
+
+## 
+
+
+# Resultados dos Testes Preliminares
+
+
+
+# Conclusão
+
+
+# Apêndice
+
+### *main.cpp*
 
 ```cpp
 #include <iostream>
+#include <thread>
+#include <chrono>
+#include <boost/asio.hpp>
+#include <fstream>
+#include <iomanip>
+#include <string>
+#include <functional>
+#include <condition_variable>
+
+// Inclusão dos Buffers e Blocos de Execução
+#include "tasks.hpp"
+#include "shared_buffers.hpp"
+#include "NavigationManager.hpp"
+#include "PIDController.hpp"
+#include "Coletor.hpp"
+#include "Camera.hpp"
+
+// Thread responsável por ler os comandos (joystick/botoes) e definir o Setpoint
+// Roda ciclicamente a cada 80ms
+// ADICIONADO: Agora recebe também o SensorBuffer para verificar o slowDown
+void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
+    NavigationManager nav_manager; 
+
+    boost::asio::io_context io_com_nav;
+    boost::asio::steady_timer timer_com_nav(io_com_nav, boost::asio::chrono::milliseconds(80)); 
+
+    std::function<void(const boost::system::error_code&)> loop_comando;
+
+    loop_comando = ([&](const boost::system::error_code& erro){
+
+        if(erro) return;
+
+        // ----- Mock de entradas -----
+        bool c_automatico = false; 
+        bool c_man = true;         
+        bool c_para = false;       
+
+        double velocidade_joystick = 5.0; 
+
+        // ----- NOVO: Lógica de Inspeção (Slowdown) -----
+        bool em_inspecao = false;
+        {
+            // Bloqueia o mutex da câmera apenas para ler a flag
+            std::lock_guard<std::mutex> lock(sensor.mtx_camera);
+            em_inspecao = sensor.e_inspecao;
+        }
+
+        // Processamento da lógica de estado da navegação
+        nav_manager.updateMode(c_automatico, c_man);
+        
+        // MUDANÇA: Agora passamos a flag em_inspecao como o novo parâmetro slowDown
+        nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);
+
+        // ----- Zona Crítica: Escrita no Buffer Compartilhado -----
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            nav.e_automatico = (nav_manager.getMode() == NavMode::AUTOMATIC);
+            nav.j_sp_velocidade = nav_manager.getTargetSpeed();
+        }
+
+        timer_com_nav.expires_at(timer_com_nav.expiry() + boost::asio::chrono::milliseconds(80));
+        timer_com_nav.async_wait(loop_comando);
+    });
+
+    timer_com_nav.async_wait(loop_comando);
+    io_com_nav.run();
+}
+
+// Thread responsável pelo controle PID (Sem mudanças aqui)
+void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
+    PIDController pid(1.0, 0.1, 0.05, 0.08);
+
+    boost::asio::io_context io_PID_nav;
+    boost::asio::steady_timer timer_PID_nav(io_PID_nav, boost::asio::chrono::milliseconds(80));
+
+    std::function<void(const boost::system::error_code&)> loop_PID;
+
+    loop_PID = ([&](const boost::system::error_code& erro){
+        if(erro) return;
+
+        float setpoint_atual = 0.0;
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            setpoint_atual = nav.j_sp_velocidade;
+        }
+
+        double velocidade_atual_robo = 0.0;
+        {
+            // Tranca a porta só para ler a velocidade com segurança
+            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+            velocidade_atual_robo = sensor.velocidade_real_medida;
+        }
+
+        double saida_aceleracao = pid.compute(static_cast<double>(setpoint_atual), velocidade_atual_robo);
+
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[PID] Setpoint: " << setpoint_atual << " m/s | Aceleracao calculada: " << saida_aceleracao << " m/s²\n";
+        }
+        
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            nav.o_aceleracao = saida_aceleracao;
+        }
+
+        timer_PID_nav.expires_at(timer_PID_nav.expiry() + boost::asio::chrono::milliseconds(80));
+        timer_PID_nav.async_wait(loop_PID);
+    });
+
+    timer_PID_nav.async_wait(loop_PID);
+    io_PID_nav.run();
+}
 
 int main() {
-    std::cout << "Hello, ATR!" << std::endl;
+    std::cout << "Iniciando Sistema de Inspecao do Tunel...\n";
+
+    NavBuffer nav;
+    SensorBuffer sensor;
+
+    // MUDANÇA: th_comando agora recebe std::ref(nav) E std::ref(sensor)
+    std::thread th_comando(t_comando_navegacao, std::ref(nav), std::ref(sensor));
+    
+    std::thread th_controle(t_controle_navegacao, std::ref(nav), std::ref(sensor));
+    std::thread th_distancia(t_calculo_distancia, std::ref(nav), std::ref(sensor));
+    std::thread th_teto(t_reconstrucao_teto, std::ref(sensor));
+    std::thread th_camera(t_inspecao_camera, std::ref(sensor));
+    std::thread th_coletor(t_coletor_dados, std::ref(sensor));
+
+    th_comando.join();
+    th_controle.join();
+    th_distancia.join();
+    th_teto.join();
+    th_camera.join();
+    th_coletor.join();
+
     return 0;
 }
+```
+
+### *shared_buffers.hpp*
+
+```cpp
+#ifndef SHARED_BUFFERS_HPP
+#define SHARED_BUFFERS_HPP
+
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+
+/* 
+Define os Buffers, Mutexes, Filas e Variáveis de Condição que permitem
+a comunicação segura entre as múltiplas threads do sistema. Garante a
+exclusão mútua nas zonas críticas, evitando condições de corrida.
+*/
+
+inline std::mutex mtx_console;
+
+// Buffer de Comando e Navegação
+// Armazena os dados de troca entre os comandos do usuário e o controle PID
+// do robo. Protegida por MUTEX para evitar Condição de Corrida.
+struct NavBuffer {
+    double j_sp_velocidade = 0.0; // Velocidade alvo solicitada (m/s)
+    double o_aceleracao = 0.0;          // Esforço do controle calculado pelo PID
+    bool e_automatico = false;// Estado de operação (Manual ou Auto)
+    std::mutex mtx;              // O cadeado do PID
+};
+
+// Armazena uma leitura única de sensor. Empacota os dados antes de enviar para 
+// a fila (queue).
+struct Medicao {
+    long long timestamp = 0; // Tempo da leitura (ms)
+    int i_encoder = 0;       // Odometria: Posição atual no eixo X
+    float i_lidar = 0.0;       // LIDAR: Distância até o teto
+    double nivel_confianca = 0; // Qualidade da medição (0 a 100)
+};
+
+// Buffer dos Sensores e Câmera
+// Armazena os dados sensoriais e sinalização de eventos críticos 
+struct SensorBuffer {
+    // ----- Fila de Dados (Produtor-Consumidor) -----
+    // A thread de Sensores "Produz" e a thread do Coletor "Consome"
+    std::queue<Medicao> fila_medicoes; 
+    std::mutex mtx_fila; // Cadeado para a inserção e remição da fila
+
+    std::mutex mtx_leituras;
+
+    // Variável de condição para o Coletor de Dados.
+    std::condition_variable cv_coletor;
+
+    // ----- Sistema de Alarme - Interrupção (Câmera) -----
+    bool e_inspecao = false; // FLAG que indica se o teto tem buracos
+    std::mutex mtx_camera;        // Cadeado para proteger a alteração da FLAG
+
+    // Variável de Condição para a Câmera 
+    bool o_liga_camera = false;
+    std::condition_variable cv_camera; // O alarme da câmera
+
+    float ultima_leitura_lidar = 10.0;
+
+    // Variável para compartilhar com o PID
+    double velocidade_real_medida = 0.0;
+};
+
+#endif
+```
+
+### *tasks.hpp*
+
+```cpp
+#ifndef TASKS_HPP
+#define TASKS_HPP
+
+#include "shared_buffers.hpp"
+
+
+void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor);
+void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor);
+
+// --- Threads do Bloco de Sensores ---
+void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor);
+void t_reconstrucao_teto(SensorBuffer& sensor);
+
+#endif
+```
+
+### *tasks.cpp*
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <boost/asio.hpp>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <functional>
+
+#include "tasks.hpp"
+#include "shared_buffers.hpp"
+#include "Lidar.hpp"
+#include "Odometria.hpp"
+
+/* Contém as threads responsáveis por ler a odometria e mapear o teto com LIDAR
+*/
+
+// --- Odometria: Produtor de dados de distância ---
+void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
+    Odometria odo; 
+
+    // === VARIÁVEIS DA FÍSICA E DA DERIVADA - GEMINI===
+    double velocidade_fisica = 0.0;
+    double posicao_fisica = 0.0;
+    int ultimo_metro_inteiro = 0;
+    int distancia_anterior = 0;
+    double dt = 0.02; // 20ms do timer
+
+    // VARIÁVEL LOCAL - GEMINI
+    bool pulso_fisico_encoder = false;
+
+    boost::asio::io_context io_odo;
+    boost::asio::steady_timer timer_odo(io_odo, boost::asio::chrono::milliseconds(20));
+
+    std::function<void(const boost::system::error_code&)> loop_odo;
+
+    loop_odo = ([&](const boost::system::error_code& erro) { 
+        if(erro) return;
+
+        // Freando o robô no mundo real - Integração
+        double aceleracao = nav.o_aceleracao * 0.1; 
+
+        velocidade_fisica += aceleracao * dt;
+        if(velocidade_fisica < 0.0) velocidade_fisica = 0.0; // Impede o robô de dar ré
+        
+        posicao_fisica += velocidade_fisica * dt;
+
+        // Encoder só vira quando acumula 1 metro
+        if ((int)posicao_fisica > ultimo_metro_inteiro) {
+            pulso_fisico_encoder = !pulso_fisico_encoder;
+            ultimo_metro_inteiro = (int)posicao_fisica;
+        }
+
+        int dist_x = odo.atualizar(pulso_fisico_encoder);
+
+        // Derivação para encontrar a velocidade
+        double variacao_distancia = dist_x - distancia_anterior;
+        double velocidade_medida = variacao_distancia / dt;
+
+        //if (dist_x != distancia_anterior) 
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[ODOMETRIA]: Distancia percorrida: " << dist_x << " m\n";
+        }
+        
+        // Atualiza a memória para o próximo ciclo de 20ms
+        distancia_anterior = dist_x;
+
+        // Guarda a velocidade medida no buffer para a thread do PID ler
+        sensor.velocidade_real_medida = velocidade_medida;
+
+        Medicao m;
+        m.i_encoder = dist_x;
+        // Timestamp simples para o coletor
+        m.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        m.i_lidar = sensor.ultima_leitura_lidar;
+        m.nivel_confianca = 100; // Valor padrão inicial
+
+        {
+            // Tranca a porta para escrever a velocidade e ler o Lidar com segurança
+            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+            sensor.velocidade_real_medida = velocidade_medida;
+            m.i_lidar = sensor.ultima_leitura_lidar; 
+        }
+
+        // ----- Zona Crítica: Guardar na fila para o Coletor -----
+        {
+            std::lock_guard<std::mutex> lock_fila(sensor.mtx_fila);
+            sensor.fila_medicoes.push(m);
+        }
+
+        sensor.cv_coletor.notify_one();
+
+        timer_odo.expires_at(timer_odo.expiry() + boost::asio::chrono::milliseconds(20));
+        timer_odo.async_wait(loop_odo);
+    });
+
+    timer_odo.async_wait(loop_odo);
+    io_odo.run();
+}
+
+// --- LIDAR / Reconstrução do teto: Identifica falhas e aciona a câmera ---
+void t_reconstrucao_teto(SensorBuffer& sensor) {
+    LidarFilter filtro(5); 
+
+    // Inicializa o filtro com valor neutro
+    for(int i = 0; i < 5; i++) { filtro.calcular(10.0f); }
+
+    std::vector<float> valores_teste;
+    std::ifstream arquivo_teto("simulacao_superficie.csv");
+    std::string linha;
+
+    // Tenta carregar o arquivo CSV
+    if (arquivo_teto.is_open()) {
+        while (std::getline(arquivo_teto, linha)) {
+            if(linha.empty()) continue;
+            try {
+                valores_teste.push_back(std::stof(linha));
+            } catch (...) { }
+        }
+        arquivo_teto.close();
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[SISTEMA] Arquivo simulacao_superficie.csv carregado com " << valores_teste.size() << " leituras.\n";
+        }
+        
+    }
+
+    // Proteção: Se o arquivo falhou ou está vazio, garante que o programa não dê crash
+    if (valores_teste.empty()) {
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cerr << "[AVISO] Arquivo de simulacao vazio ou nao encontrado. Usando teto plano.\n";
+        }
+        
+        valores_teste.push_back(10.0f);
+    }
+
+    int indice_teste = 0;
+    boost::asio::io_context io_lidar;
+    boost::asio::steady_timer timer_lidar(io_lidar, boost::asio::chrono::milliseconds(100));
+
+    std::function<void(const boost::system::error_code&)> loop_lidar;
+
+    loop_lidar = ([&](const boost::system::error_code& erro){ 
+        if(erro) return;
+
+        // Leitura do valor atual do vetor (circular)
+        float valor_atual = valores_teste[indice_teste];
+        indice_teste = (indice_teste + 1) % valores_teste.size();
+
+        float media = filtro.calcular(valor_atual);
+
+        // PROTEÇÃO DE MEMÓRIA: Tranca a porta para atualizar o SensorBuffer
+        {
+            std::lock_guard<std::mutex> lock_memoria(sensor.mtx_leituras);
+            sensor.ultima_leitura_lidar = media;
+        }
+
+        // PROTEÇÃO DE TELA: Imprime a medida atual para o usuário ver
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[LIDAR] Medida atual: " << media << " m\n";
+        }
+
+        bool falha_detectada = false;
+        float altura_ideal = 10.0f;
+        float margem_erro = 0.5f;
+
+        // Lógica de Detecção
+        if (media > (altura_ideal + margem_erro)){
+            {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[LIDAR] FALHA: BURACO detectado! (Dist/Altura: " << media << "m)\n";
+            }
+            
+            falha_detectada = true;
+        }
+        else if(media < (altura_ideal - margem_erro)){
+            {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[LIDAR] FALHA: SALIENCIA detectada! (Dist/Altura: " << media << "m)\n";
+            }
+            
+            falha_detectada = true;
+        }
+
+        // Se achou uma falha, aciona o Alarme e sinaliza o Slowdown
+        if (falha_detectada) {
+            {
+                std::lock_guard<std::mutex> lock_camera(sensor.mtx_camera);
+                sensor.e_inspecao = true;     // Ativa o Slowdown no NavigationManager
+                sensor.o_liga_camera = true;  // Acorda a thread da Câmera
+            } 
+            sensor.cv_camera.notify_one(); 
+        }
+
+        timer_lidar.expires_at(timer_lidar.expiry() + boost::asio::chrono::milliseconds(100));
+        timer_lidar.async_wait(loop_lidar);
+    });
+
+    timer_lidar.async_wait(loop_lidar);
+    io_lidar.run();
+}
+```
+
+### *PIDController.hpp*
+
+```cpp
+#ifndef PID_CONTROLLER_HPP
+#define PID_CONTROLLER_HPP
+
+class PIDController {
+private:
+    double Kp, Ki, Kd;
+    double integral;
+    double last_error;
+    double dt;
+    double output_limit;
+    public:
+    PIDController(double kp, double ki, double kd, double sample_time);
+    double compute(double setpoint, double current_value);
+    void reset();
+    void setGains(double kp, double ki, double kd);
+};
+
+#endif
+```
+
+### *PIDController.cpp*
+
+```cpp
+#include "PIDController.hpp"
+#include <algorithm> 
+
+// Bloco: Controle de Navegação
+
+// ----- Construtor da Classe PIDController -----
+// integral(0.0): acumula o erro ao longo do tempo. Parcela I
+// last_error(0.0): Parcela D.
+// dt(sample_time): tempo de amostragem (Delta T).
+// output_limit(100.0): PWM de 100%
+PIDController::PIDController(double kp, double ki, double kd, double sample_time)
+    : Kp(kp), Ki(ki), Kd(kd), integral(0.0), last_error(0.0), dt(sample_time), output_limit(100.0) {}
+
+// Permite troca de parâmetros P, I e D com o robô em funcionamento.
+void PIDController::setGains(double kp, double ki, double kd) {
+    Kp = kp;
+    Ki = ki;
+    Kd = kd;
+}
+
+// Troca de modo de Manual para Automático: zera tudo.
+void PIDController::reset() {
+    integral = 0.0;
+    last_error = 0.0;
+}
+
+// Motor do PID
+double PIDController::compute(double setpoint, double current_value) {
+    // Onde eu quero estar (setpoint) - onde eu estou agora.
+    double error = setpoint - current_value;
+
+    // Proporcional 
+    double P = Kp * error;
+
+    // Soma do erro ao longo do tempo: Integral
+    integral += error * dt;
+    double I = Ki * integral;
+
+    // Inclinação da reta do erro: Derivativo
+    double derivative = (error - last_error) / dt;
+    double D = Kd * derivative;
+
+    // Atualiza a memória para o próximo ciclo
+    last_error = error;
+
+    double output = P + I + D;
+
+    // Robo só aceita força de -100 a 100
+    if (output > output_limit) {
+        output = output_limit;
+        integral -= error * dt; 
+        
+    } else if (output < -output_limit) {
+        output = -output_limit;
+        integral -= error * dt;
+    }
+
+    return output;
+}
+```
+
+### *NavegationManager.hpp*
+
+```cpp
+#ifndef NAVIGATION_MANAGER_HPP
+#define NAVIGATION_MANAGER_HPP
+
+enum class NavMode { MANUAL, AUTOMATIC };
+
+class NavigationManager {
+private:
+    NavMode currentMode;
+    double targetSpeed;
+
+public:
+    NavigationManager();
+    
+    void updateMode(bool cmdAuto, bool cmdMan);
+    
+    void processInputs(double joystickSpeed, bool btnStop, bool slowDown);
+
+    NavMode getMode() const;
+    double getTargetSpeed() const;
+};
+
+#endif
+```
+
+### *NavegationManager.cpp*
+
+```cpp
+#include "NavigationManager.hpp"
+
+// Bloco: Comando de Navegação
+
+// ----- Construtor da Classe NavigationManager -----
+NavigationManager::NavigationManager() : currentMode(NavMode::MANUAL), targetSpeed(0.0) {}
+
+// Seleção: Manual / Automático
+void NavigationManager::updateMode(bool cmdAuto, bool cmdMan) {
+    if (cmdAuto) {
+        currentMode = NavMode::AUTOMATIC;
+    } else if (cmdMan) {
+        currentMode = NavMode::MANUAL;
+    }
+}
+
+// Acelerador e Freio com lógica de redução de velocidade (slowDown)
+void NavigationManager::processInputs(double joystickSpeed, bool btnStop, bool slowDown) {
+    // 1. Botão de Emergência: Prioridade máxima, o robô para.
+    if (btnStop) {
+        targetSpeed = 0.0;
+        return;
+    }
+
+    // 2. Lógica de Inspeção (slowDown): Se a câmera estiver processando,
+    // a velocidade cai para um valor baixo (ex: 0.2) para garantir a qualidade.
+    if (slowDown) {
+        targetSpeed = 1; 
+    } 
+    else {
+        // 3. Operação Normal
+        if (currentMode == NavMode::MANUAL) {
+            // Velocidade vem do controle joystick
+            targetSpeed = joystickSpeed;
+        } else {
+            // Velocidade automática nominal: 1.0
+            targetSpeed = 1.0; 
+        }
+    }
+}
+
+NavMode NavigationManager::getMode() const {
+    return currentMode;
+}
+
+double NavigationManager::getTargetSpeed() const {
+    return targetSpeed;
+}
+```
+
+### *Camera.hpp*
+
+```cpp
+#ifndef CAMERA_HPP
+#define CAMERA_HPP
+
+#include "shared_buffers.hpp"
+
+// Thread que simula a inspeção visual detalhada
+void t_inspecao_camera(SensorBuffer& sensor);
+
+// Função para simular carga de CPU (IA)
+void processamento_pesado_ia();
+
+#endif
+```
+
+### *Camera.cpp*
+
+```cpp
+#include "Camera.hpp"
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <chrono>
+
+// Função otimizada para garantir carga real de CPU
+void processamento_pesado_ia() {
+    double resultado = 0.0;
+    // Ajustei o número de iterações para chegar perto dos 30-40ms em CPUs modernas
+    // Se ficar rápido demais no seu PC, aumente para 2000000
+    for (int i = 0; i < 1500000; ++i) {
+        resultado += std::sin(i) * std::cos(i) * std::tan(i);
+    }
+    
+    // Impede que o compilador ignore o loop (Dead Code Elimination)
+    if(resultado == 0.00000123) std::cout << resultado; 
+}
+
+void t_inspecao_camera(SensorBuffer& sensor) {
+    while (true) {
+        // 1. Bloqueio inicial para esperar o sinal
+        std::unique_lock<std::mutex> lock(sensor.mtx_camera);
+
+        // 2. Aguarda sinalização do LIDAR (o_liga_camera)
+        // O robô já estará em Slowdown (Setpoint 1) antes da câmera acordar
+        sensor.cv_camera.wait(lock, [&sensor] { 
+            return sensor.o_liga_camera; 
+        });
+
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[CAMERA] Falha detectada! Iniciando processamento de IA...\n";
+        }
+
+        // 3. LIBERA O LOCK durante o processamento pesado
+        // Isso é CRITICAL em ATR para permitir que a thread de comando 
+        // continue lendo o buffer se necessário.
+        lock.unlock();
+        
+        auto start = std::chrono::high_resolution_clock::now();
+        processamento_pesado_ia();
+        auto end = std::chrono::high_resolution_clock::now();
+
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+        
+        // 4. BLOQUEIA novamente para resetar as flags de estado
+        lock.lock();
+        
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[CAMERA] Inspecao concluida em " << elapsed.count() << " ms.\n";
+        }
+
+        // RESET DAS FLAGS: Aqui o robô recebe permissão para voltar a 5.0
+        sensor.o_liga_camera = false;
+        sensor.e_inspecao = false; 
+        
+        // O lock é liberado automaticamente ao voltar para o wait ou fim do loop
+    }
+}
+```
+
+### *Coletor.hpp*
+
+```cpp
+#ifndef COLETOR_HPP
+#define COLETOR_HPP
+
+#include <iomanip>
+#include <iostream>
+#include <fstream>
+#include <string>
+#include "shared_buffers.hpp"
+
+// Classe Coletor de Dados: lógica de salvar arquivos no HD 
+class ColetorCSV {
+private:
+    std::ofstream arquivo;
+
+public:
+    // Construtor: Abre o arquivo assim que a classe for instanciada
+    ColetorCSV(const std::string& nome_arquivo) {
+        arquivo.open(nome_arquivo, std::ios::app);
+        if (!arquivo.is_open()) {
+            std::cerr << "[ERRO] Falha ao abrir o arquivo de log: " << nome_arquivo << std::endl;
+        }
+    }
+
+    // Destrutor: Fecha o arquivo sozinho para não corromper os dados
+    ~ColetorCSV() {
+        if (arquivo.is_open()) {
+            arquivo.close();
+        }
+    }
+
+    bool estaAberto() const {
+        return arquivo.is_open();
+    }
+
+    // Método para salvar os dados
+    void gravar(const Medicao& dado) {
+        if (arquivo.is_open()) {
+            arquivo << dado.timestamp << "," 
+                    << dado.i_encoder << "," 
+                    << std::fixed << std::setprecision(2) << dado.i_lidar << "," 
+                    << std::fixed << std::setprecision(2) << dado.nivel_confianca << std::endl;
+        }
+    }
+};
+
+// Protótipo da função da thread
+void t_coletor_dados(SensorBuffer& sensor);
+
+#endif
+```
+
+### *Coletor.cpp*
+
+```cpp
+#include "Coletor.hpp"
+#include <mutex>
+#include <condition_variable>
+#include <cmath> // Necessário para pow() e sqrt()
+
+// Thread responsável por consumir os dados da fila, analisar a confiança e salvar no disco
+void t_coletor_dados(SensorBuffer& sensor) {
+    
+    ColetorCSV logger("telemetria_inspecao.csv");
+
+    if (!logger.estaAberto()) {
+        return;
+    }
+
+    // Variáveis para guardar a última posição e calcular a distância
+    double ultimo_x = 0.0;
+    double ultimo_y = 0.0;
+
+    while (true) { 
+        std::unique_lock<std::mutex> lock_fila(sensor.mtx_fila);
+
+        sensor.cv_coletor.wait(lock_fila, [&sensor] { 
+            return !sensor.fila_medicoes.empty(); 
+        });
+        
+        while (!sensor.fila_medicoes.empty()) {
+            Medicao dado = sensor.fila_medicoes.front();
+            sensor.fila_medicoes.pop();
+
+            // --- Análise de Confiança ---
+            
+            // Calcula a distância entre o ponto atual e o último ponto
+            double distancia = std::sqrt(std::pow(dado.i_encoder - ultimo_x, 2) + 
+                                         std::pow(dado.i_lidar - ultimo_y, 2));
+
+            // Lógica de Confiança: Se a distância aumenta, a confiança cai.
+            // O fator "5.0" é um multiplicador de sensibilidade
+            double confianca_calculada = 100.0 - (distancia * 5.0);
+            
+            // Travas de segurança para não ter confiança negativa ou acima de 100%
+            if (confianca_calculada < 0.0) confianca_calculada = 0.0;
+            if (confianca_calculada > 100.0) confianca_calculada = 100.0;
+
+            dado.nivel_confianca = confianca_calculada;
+            ultimo_x = dado.i_encoder;
+            ultimo_y = dado.i_lidar;
+
+            // Destranca para gravar no HD 
+            lock_fila.unlock(); 
+            logger.gravar(dado);
+            lock_fila.lock(); 
+        } 
+    }
+}
+```
+
+### *Odometria.hpp*
+
+```cpp
+#ifndef ODOMETRIA_HPP
+#define ODOMETRIA_HPP
+
+class Odometria {
+private:
+    bool estado_anterior = false;
+    int distancia_total_x = 0;
+
+public:
+    Odometria();
+    int atualizar(bool sinal_encoder);
+    int get_distancia();
+};
+
+#endif
+```
+
+### *Odometria.cpp*
+
+```cpp
+#include "Odometria.hpp"
+
+#include <iostream>
+
+// Bloco: Cálculo da distância percorrida
+
+// ----- Contrutor da Classe Odometria -----
+// distancia_total_x(0): robô é ligado, roda está parada -> distância inicial = 0.
+// estado_anterior(false): sensor começou desligado.
+Odometria::Odometria() : estado_anterior(false), distancia_total_x(0) {}
+
+// Borda de Subida
+int Odometria::atualizar(bool sinal_encoder) {
+
+    // Detecta borda de subida
+    // garante contagem única apenas na exata transição de 0 para 1.
+    if (sinal_encoder && !estado_anterior) {
+        distancia_total_x++; // Soma 1 metro
+    }
+
+    // Atualiza memória
+    estado_anterior = sinal_encoder;
+    
+    return distancia_total_x;
+}
+
+int Odometria::get_distancia() {
+    return distancia_total_x;
+}
+```
+
+### *Lidar.hpp*
+
+```cpp
+#ifndef LIDAR_HPP
+#define LIDAR_HPP
+
+#include <vector>
+
+class LidarFilter {
+private:
+    std::vector<int> buffer;
+    int head = 0;
+    int window_size;
+    float ultima_media = 0.0;
+
+public:
+    // Escolha: size = 5. Com a janela cíclica de 100ms, uma janela de tamanho 5
+    // dá um atraso de meio segundo, filtrando picos isolados do sensor.
+    LidarFilter(int size = 5);
+    float calcular(float nova_leitura);
+    float get_ultima_media();
+};
+
+#endif
+```
+
+### *Lidar.cpp*
+
+```cpp
+#include "Lidar.hpp"
+#include <numeric>
+#include <iostream>
+
+// Bloco: Reconstrução superfície do teto do túnel
+
+// Lógica: Filtro de Média Móvel com Buffer Circular
+// Guarda as última "N" leituras e tira uma média, suavizando a visão
+// do robô e eliminando ruídos. 
+
+// ----- Construtor da classe LidarFilter -----
+// size: tamanho da janela.
+// buffer(size, 0): cria uma lista com 'size' espaços.
+// window_size(size): guarda o número 'size' para calcular a média.
+LidarFilter::LidarFilter(int size) : buffer(size, 0), window_size(size) {}
+
+// Buffer Circular 
+float LidarFilter::calcular(float nova_leitura) {
+
+    // Substitui a leitura mais velha pela mais nova.
+    buffer[head] = nova_leitura;
+
+    // Lógica do buffer circular: quando o resto da divisão da posição pelo tamanho da janela
+    // for 0 (indicando estar na última posição do buffer), head volta para a primeira posição.
+    head = (head + 1) % window_size;
+
+    // Função accumulate soma todos os itens da lista.
+    float soma = std::accumulate(buffer.begin(), buffer.end(), 0.0);
+
+    ultima_media = soma / window_size;
+    
+    return ultima_media;
+}
+
+// Para leitura da última medida
+float LidarFilter::get_ultima_media() {
+    return ultima_media;
+}
+```
