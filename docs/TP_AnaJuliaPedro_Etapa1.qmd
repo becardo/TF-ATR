@@ -13,6 +13,8 @@ format:
     toc: true 
     number-sections: true
     colorlinks: true
+    code-line-numbers: true
+    code-overflow: wrap
 ---
 
 # Introdução
@@ -20,9 +22,9 @@ O monitoramento e a manutenção preventiva de infraestruturas críticas subterr
 
 Para mitigar essas limitações, o presente trabalho aborda o desenvolvimento de um sistema computacional concorrente embarcado para o controle e telemetria de um robô de inspeção autônoma de túneis. O problema central consiste em gerenciar, em tempo real, a concorrência e a sincronização de tarefas com diferentes restrições temporais (deadlines), divididas essencialmente em duas frentes integradas:
 
-Controle Dinâmico de Navegação: A execução de algoritmos de comando e controle em malha fechada (PID) que devem responder deterministicamente a uma frequência fixa para garantir a estabilidade cinemática do veículo.
+* Controle Dinâmico de Navegação: A execução de algoritmos de comando e controle em malha fechada (PID) que devem responder deterministicamente a uma frequência fixa para garantir a estabilidade cinemática do veículo.
 
-Percepção e Inspeção Reativa: O processamento assíncrono de dados volumosos provenientes de sensores de varredura (LIDAR) e sistemas de visão artificial (IA por Câmera), que exigem uma redução coordenada na velocidade do robô (slowdown) ao detectarem variações geométricas severas no teto para viabilizar registros fotográficos precisos.
+* Percepção e Inspeção Reativa: O processamento assíncrono de dados volumosos provenientes de sensores de varredura (LIDAR) e sistemas de visão artificial (IA por Câmera), que exigem uma redução coordenada na velocidade do robô (slowdown) ao detectarem variações geométricas severas no teto para viabilizar registros fotográficos precisos.
 
 Dessa forma, a arquitetura do software deve ser estruturada para mitigar condições de corrida (race conditions) no acesso aos buffers de memória compartilhada e evitar o desperdício de ciclos de processamento da CPU, utilizando primitivas rigorosas de exclusão mútua (mutexes) e sincronização orientada a eventos (variáveis de condição).
 
@@ -30,6 +32,8 @@ Dessa forma, a arquitetura do software deve ser estruturada para mitigar condiç
 # Proposta da Arquitetura
 
 A arquitetura do sistema foi concebida segundo o princípio de separação clara entre **simulação/operador** e **controle embarcado concorrente**, interligados por comunicação assíncrona baseada em mensagens. O objetivo é garantir determinismo nas tarefas críticas de controle e, simultaneamente, flexibilidade para tarefas de percepção e inspeção.
+
+![Proposta da Arquitetura - Sistema Completo.](../Imagens/Arquitetura.jpg){#fig-Arquitetura width=85%}
 
 O sistema é dividido em dois processos principais que executam em paralelo.
 
@@ -49,13 +53,13 @@ A comunicação entre os processos é realizada por meio de um modelo **Publish/
 
 ## Front-End — Simulação e Interface do Operador
 
-O processo Front-End é implementado em Python utilizando Pygame e Pandas. Ele possui três responsabilidades principais:
+O processo Front-End será implementado em Python utilizando Pygame e Pandas. Ele irá possuir três responsabilidades principais:
 
-- Simulação da navegação do robô no túnel  
-- Renderização dos sensores (LIDAR, câmera e encoders)  
-- Interação com o operador remoto  
+- Simulação da navegação do robô no túnel;  
+- Renderização dos sensores (LIDAR, câmera e encoders);  
+- Interação com o operador remoto.  
 
-A interface gráfica permite o envio de comandos de operação e a visualização em tempo real da telemetria do sistema.
+A Interface Gráfica permite o envio de comandos de operação e a visualização em tempo real da telemetria do sistema.
 
 Os dados produzidos pelo Front-End são publicados via Pub/Sub e consumidos pelo processo embarcado.
 
@@ -63,10 +67,10 @@ Os dados produzidos pelo Front-End são publicados via Pub/Sub e consumidos pelo
 
 ## Back-End — Controle Embarcado Concorrente
 
-O Back-End é implementado em C++ utilizando:
+O Back-End é implementado em C++ utilizando as APIs:
 
-- `std::thread` para concorrência  
-- `Boost.Asio` para timers e comunicação assíncrona  
+- `std::thread`, para concorrência;  
+- `Boost.Asio`, para timers e comunicação assíncrona.  
 
 Este processo é composto por seis threads concorrentes com diferentes requisitos temporais.
 
@@ -142,32 +146,104 @@ Essa separação evita bloqueios nas threads críticas de controle.
 
 ---
 
-## Comunicação Entre Threads — Memória Compartilhada
+## Sincronização, Buffers e Comunicação entre Threads - Memória Compartilhada
 
-Para reduzir condições de corrida, a memória foi segmentada em buffers especializados com granularidade fina.
+A comunicação entre as seis tarefas do sistema embarcado foi projetada utilizando o modelo de **Memória Compartilhada**. Para garantir a integridade dos dados e o determinismo temporal exigido em sistemas de tempo real, a arquitetura foi segmentada em buffers especializados com _granularidade fina_. Essa abordagem evita o uso de um único mutex global para toda a memória, o que causaria severo bloqueio mútuo (contention) e degradação do desempenho das threads críticas.
+
+A Sincronização e a Exclusão Mútua foram implementadas utilizando as primitivas _std::mutex_ e _std::lock_guard_ da biblioteca padrão do C++17, operando sob três pilares fundamentais: 
+
+- **Garantia de Exclusão Mútua (Zonas Críticas)**: Proteção de variáveis acessadas por múltiplas threads simultaneamente (como a _velocidade real medida_ e o _setpoint_), mitigando completamente as condições de corrida (_race conditions_).
+- **Sincronização Orientada a Eventos**: Uso de variáveis de condição (*std::condition_variable*) para suspender threads reativas (Câmera e Coletor), garantindo que elas consumam $0\%$ de processamento da CPU enquanto aguardam os sinais de ativação (*notify_one*).
+- **Isolamento de Chamadas de Sistema (E/S)**: Uso do mutex mtx_console para serializar o acesso ao fluxo _std::cout_, impedindo o atropelamento de strings no terminal e garantindo logs perfeitamente cronológicos.
 
 ### NavBuffer — Dados de Navegação
 
-Contém:
-- `j_sp_velocidade`
-- `o_aceleracao`
-- `e_automatico`
-
-Proteção:
 ```cpp
-mutex nav.mtx;
-## Sincronização e Buffers
+struct NavBuffer {
+    double j_sp_velocidade = 0.0; // Velocidade alvo solicitada (m/s)
+    double o_aceleracao = 0.0;          // Esforço do controle calculado pelo PID
+    bool e_automatico = false;// Estado de operação (Manual ou Auto)
+    std::mutex mtx;              // O cadeado do PID
+};
+```
+
+O _NavBuffer_ funciona como a ponte de controle entre a camada de decisão (o operador ou a lógica automática de estados) e a camada de atuação física (o algoritmo PID). Ele foi projetado para isolar as variáveis de referência de movimento do veículo.
+
+- **j_sp_velocidade (double)**: Armazena o Setpoint ativo do robô em ($\text{m/s}$). A transição dessa variável para o tipo double foi necessária para permitir que os estados de desaceleração escalonada (como os $0.2\text{ m/s}$ da inspeção) fossem transmitidos sem truncamento matemático para a malha do PID.
+- **o_aceleracao (double)**: Guarda o esforço de controle (a aceleração calculada em $\text{m/s}^2$) gerado pelo PID. A thread de odometria lê esse valor continuamente para simular a resposta física do motor no ambiente por meio de integração numérica.
+- **e_automatico (bool)**: Uma flag de estado que dita se o robô deve seguir as ordens dinâmicas do joystick manual ou a velocidade nominal do modo automático.
+- **std::mutex mtx**: O cadeado exclusivo deste buffer. Ele garante que a thread de Comando de Navegação possa atualizar o Setpoint (escrevendo no buffer) ao mesmo tempo em que a thread do PID faz a leitura desses alvos a cada $80\text{ ms}$, sem que ocorra leitura de dados parciais ou corrompidos.
+
+### SensorBuffer - Dados dos Sensores 
+
+```cpp
+struct SensorBuffer {
+    // ----- Fila de Dados (Produtor-Consumidor) -----
+    std::queue<Medicao> fila_medicoes; 
+    std::mutex mtx_fila; // Cadeado para a inserção e remição da fila
+    std::mutex mtx_leituras; 
+
+    std::condition_variable cv_coletor; // Variável de condição para o Coletor de Dados.
+
+    // ----- Sistema de Alarme - Interrupção (Câmera) -----
+    bool e_inspecao = false; // FLAG que indica se o teto tem buracos
+    std::mutex mtx_camera;        // Cadeado para proteger a alteração da FLAG
+
+    bool o_liga_camera = false; // Variável de Condição para a Câmera 
+    std::condition_variable cv_camera; // O alarme da câmera
+
+    float ultima_leitura_lidar = 10.0;
+    double velocidade_real_medida = 0.0; // Variável para compartilhar com o PID
+};
+```
+
+O _SensorBuffer_ é a estrutura de dados mais complexa do sistema, atuando na telemetria e detecção de falhas. Ele gerencia três fluxos concorrentes distintos:
+
+- **A Fila de Mensagens (*fila_medicoes*)**: Implementa um padrão de arquitetura Produtor-Consumidor assíncrono. A thread de Cálculo de Distância atua como a _Produtora_, empacotando os dados do Encoder e do LIDAR na estrutura Medicao e inserindo-os na fila (fila_medicoes.push()). A thread Coletor de Dados atua como a _Consumidora_, retirando os pacotes e salvando-os no HD. Esse arranjo é protegido pelo *mtx_fila* e sincronizado pela variável de condição *cv_coletor*, garantindo que a Coletora só acorde quando houver dados prontos para escrita.
+- **A Malha de Interrupção da Câmera (*e_inspecao*, *o_liga_camera* e *cv_camera*)**: Funciona como um sistema reativo de alarme por software. Quando a thread do LIDAR detecta uma anomalia na superfície, ela tranca o *mtx_camera*, ativa as flags *e_inspecao* sinalizando o freio imediato para a Navegação, e *o_liga_camera*, por fim disparando o sinal *cv_camera.notify_one()*. Isso faz a thread Inspeção Câmera acordar instantaneamente para iniciar o processamento pesado de registro da superfície.
+- **Compartilhamento de Variáveis Rápidas (*ultima_leitura_lidar* e *velocidade_real_medida*)**: Variáveis globais protegidas pelo *mtx_leituras*. Elas servem para troca rápida de dados de telemetria entre threads cíclicas (como o PID lendo a velocidade real instantânea calculada pela Odometria), evitando que o PID precise buscar dados dentro da fila de medições e perca o seu deadline.
 
 ## APIs e Gerenciamento das Tarefas Cíclicas
 
-## 
+Para gerenciar a execução periódica das tarefas de tempo real sem ocorrer acúmulo de atrasos (_drift temporal_) e flutuações (_jitter_),causados por funções de suspensão simples como o _sleep()_, foi utilizada a biblioteca _Boost.Asio_ através da classe *boost::asio::steady_timer*.
 
+O mecanismo baseia-se em um modelo assíncrono não-bloqueante operado por loops baseados em chamadas recursivas indiretas via funções lambda capturadas por referência ([&]). Ao final de cada ciclo de execução de uma tarefa, o timer correspondente tem seu próximo instante de disparo incrementado deterministicamente a partir do seu ponto de expiração prévio, e não a partir do tempo atual do sistema. Isso assegura que o período médio da tarefa mantenha-se estrito e imune ao tempo de execução interno do código de cada thread.
+
+O gerenciamento das tarefas foi distribuído em duas categorias principais de concorrência baseadas nas APIs do C++17:
+
+- **Execução de Tarefas Cíclicas (Time-Triggered)** 
+Implementadas via *boost::asio::steady_timer* associadas a instâncias dedicadas de *boost::asio::io_context*. Cada contexto de E/S executa de forma bloqueante através do método *io_context::run()*, encapsulado dentro de sua própria *std::thread* nativa. Isso garante o isolamento de CPU para que os determinismos de 20 ms (Odometria), 80 ms (Comando e PID) e 100 ms (LIDAR) operem concorrentemente.
+
+- **Execução de Tarefas Reativas (Event-Triggered)**
+Diferente das tarefas cíclicas, as threads da Inspeção por Câmera e do Coletor de Dados operam de forma aperiódica (sob demanda). Elas utilizam a API nativa de sincronização *std::condition_variable* associada a um *std::unique_lock*. Em vez de realizarem _busy-wait_, essas threads permanecem suspensas pelo sistema operacional no método .wait(), consumindo $0\%$ de CPU. Elas são acordadas de forma determinística por meio de interrupções de software via .notify_one(), disparadas imediatamente pelas threads produtoras (LIDAR e Odometria) assim que um evento crítico ou um novo dado é registrado.
+
+## Mecanismos de Qualidade de Serviço (QoS) na Arquitetura de Software
+
+No contexto de Sistemas de Tempo Real Críticos, o conceito de Qualidade de Serviço (QoS — Quality of Service) aplica-se diretamente ao gerenciamento estratégico dos recursos computacionais (tempo de CPU e acesso à memória) sob condições de alta carga de processamento. 
+
+A arquitetura deste sistema adota políticas estritas de QoS para garantir o determinismo das malhas de controle, estruturando as tarefas em três níveis de criticidade bem definidos:
+
+- _QoS de Alta Prioridade (Hard Real-Time / Determinístico)_
+As tarefas associadas à dinâmica cinemática e estabilidade do robô, especificamente a Thread de Cálculo de Distância (20 ms) e a Thread de Controle de Navegação (80 ms), possuem requisitos temporais rígidos. A perda de um único deadline nessas threads causaria erros acumulados na odometria ou instabilidade na malha fechada do PID. Para assegurar o QoS dessas tarefas, elas foram isoladas em contextos de execução independentes (boost::asio::io_context) alimentados por relógios de alta precisão baseados em hardware (steady_timer), garantindo uma contagem de tempo estável.
+
+- _QoS Adaptativo por Inversão de Demanda (Reactive / Event-Triggered)_
+A Thread de Inspeção por Câmera executa processamentos matemáticos intensivos para simular a carga de processamento de uma IA. Se ela executasse continuamente com prioridade máxima, causaria a inanição (starvation) do PID por disputa de CPU. O mecanismo de QoS implementado resolve este conflito acionando a flag *e_inspecao*, reduzindo imediatamente a velocidade alvo do robô para $0.2\text{ m/s}$. Essa redução na dinâmica compensa o tempo que a CPU passará dedicada ao processamento da imagem, garantindo uma operação segura durante a inspeção.
+
+- _QoS de Baixa Prioridade (Best-Effort / Assíncrono)_
+A Thread Coletora de Dados, encarregada de gravar as medições em disco (em primeiro momento, no arquivo telemetria_inspecao.csv), opera sob o princípio Best-Effort. Como escrever no HD é lento, fazer isso direto no PID ou na Odometria faria as threads atrasarem e estourarem seus tempos limites (80 ms e 20 ms). Para resolver, usamos uma fila na RAM: a Odometria joga a medição na fila (o que é instantâneo) e volta para o seu ciclo de 20 ms. A Coletora roda em segundo plano, tirando os dados da fila e gravando no HD aos poucos, aproveitando as folgas da CPU.
 
 # Resultados dos Testes Preliminares
 
+Para validar o comportamento do sistema, utilizamos o arquivo _simulacao_superficie.csv_ para emular as leituras do sensor LIDAR. Esse arquivo contém uma sequência de medidas simulando o teto plano do túnel a $10.0\text{ m}$ de altura, intercalada com variações de distância que representam anomalias geométricas (buracos e saliências). 
 
+Os testes em malha fechada demonstraram o seguinte comportamento dinâmico, em LOGS no Terminal: 
+
+![LOGS de execução do Terminal.](../Imagens/LOGS_execucao.png){#fig-LOGS width=85%}
+
+O filtro de média móvel (LidarFilter) processou as leituras do arquivo a cada 100 ms, eliminando ruídos isolados e calculando a média contínua da superfície. Ao passar por uma leitura superior a 10.5 m (configurando um buraco) ou inferior a 9.5 m (uma saliência), a thread de reconstrução detectou a anomalia e disparou o alarme através da variável de condição *cv_camera*, ativando também a flag *e_inspecao*. Assim que essa flag foi acionada, o gerenciador de navegação alterou instantaneamente o setpoint de velocidade de 5.0 m/s (ou 1.0 m/s no modo automático) para 0.2 m/s. O controlador PID respondeu aplicando uma aceleração negativa estável, desacelerando o robô com segurança. Por fim, a thread da Câmera acordou sob demanda, processou a simulação pesada da IA e, após a conclusão, resetou as flags de estado, permitindo que o robô retomasse sua velocidade nominal de cruzeiro de forma totalmente autônoma, sem travamentos ou deadlocks.
 
 # Conclusão
+
 
 
 # Apêndice

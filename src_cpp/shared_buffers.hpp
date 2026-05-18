@@ -34,29 +34,24 @@ struct Medicao {
 
 // Buffer dos Sensores e Câmera
 // Armazena os dados sensoriais e sinalização de eventos críticos 
+// A thread de Sensores "Produz" e a thread do Coletor "Consome"
 struct SensorBuffer {
     // ----- Fila de Dados (Produtor-Consumidor) -----
-    // A thread de Sensores "Produz" e a thread do Coletor "Consome"
     std::queue<Medicao> fila_medicoes; 
     std::mutex mtx_fila; // Cadeado para a inserção e remição da fila
+    std::mutex mtx_leituras; 
 
-    std::mutex mtx_leituras;
-
-    // Variável de condição para o Coletor de Dados.
-    std::condition_variable cv_coletor;
+    std::condition_variable cv_coletor; // Variável de condição para o Coletor de Dados.
 
     // ----- Sistema de Alarme - Interrupção (Câmera) -----
     bool e_inspecao = false; // FLAG que indica se o teto tem buracos
     std::mutex mtx_camera;        // Cadeado para proteger a alteração da FLAG
 
-    // Variável de Condição para a Câmera 
-    bool o_liga_camera = false;
+    bool o_liga_camera = false; // Variável de Condição para a Câmera 
     std::condition_variable cv_camera; // O alarme da câmera
 
     float ultima_leitura_lidar = 10.0;
-
-    // Variável para compartilhar com o PID
-    double velocidade_real_medida = 0.0;
+    double velocidade_real_medida = 0.0; // Variável para compartilhar com o PID
 };
 
 #endif
