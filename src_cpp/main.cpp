@@ -18,7 +18,6 @@
 
 // Thread responsável por ler os comandos (joystick/botoes) e definir o Setpoint
 // Roda ciclicamente a cada 80ms
-// ADICIONADO: Agora recebe também o SensorBuffer para verificar o slowDown
 void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     NavigationManager nav_manager; 
 
@@ -38,7 +37,6 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
 
         double velocidade_joystick = 5.0; 
 
-        // ----- NOVO: Lógica de Inspeção (Slowdown) -----
         bool em_inspecao = false;
         {
             // Bloqueia o mutex da câmera apenas para ler a flag
@@ -48,8 +46,6 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
 
         // Processamento da lógica de estado da navegação
         nav_manager.updateMode(c_automatico, c_man);
-        
-        // MUDANÇA: Agora passamos a flag em_inspecao como o novo parâmetro slowDown
         nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);
 
         // ----- Zona Crítica: Escrita no Buffer Compartilhado -----
@@ -118,7 +114,6 @@ int main() {
     NavBuffer nav;
     SensorBuffer sensor;
 
-    // MUDANÇA: th_comando agora recebe std::ref(nav) E std::ref(sensor)
     std::thread th_comando(t_comando_navegacao, std::ref(nav), std::ref(sensor));
     
     std::thread th_controle(t_controle_navegacao, std::ref(nav), std::ref(sensor));
