@@ -3,7 +3,7 @@ title: "Sistema Automatizado de Inspeção de Túneis"
 subtitle: "Trabalho Final - Automação em Tempo Real - Etapa 1"
 author: 
   - name: Ana Beatriz Soares Cardoso - 2022108170
-  - name: Julia Pereira Maia Ribeiro - 
+  - name: Julia Pereira Maia Ribeiro - 2021014864
   - name: Pedro Eduardo Alvino Tapia - 
 institute: "Universidade Federal de Minas Gerais (UFMG) - Engenharia de Controle e Automação"
 date: today
@@ -18,7 +18,7 @@ format:
 ---
 
 # Introdução
-O monitoramento e a manutenção preventiva de infraestruturas críticas subterrâneas, como túneis rodoviários e metroviários, apresentam desafios severos de segurança operacional e eficiência de inspeção. Tradicionalmente, a identificação de anomalias estruturais — tais como falhas na superfície do teto, infiltrações ou deformações geométricas — depende de inspeções visuais manuais intermitentes, as quais expõem os operadores a ambientes de risco e demandam a interrupção prolongada do tráfego.
+O monitoramento e a manutenção preventiva de infraestruturas críticas subterrâneas, como túneis rodoviários e metroviários, apresentam desafios severos de segurança operacional e eficiência de inspeção. Tradicionalmente, a identificação de anomalias estruturais, tais como falhas na superfície do teto, infiltrações ou deformações geométricas, depende de inspeções visuais manuais intermitentes, as quais expõem os operadores a ambientes de risco e demandam a interrupção prolongada do tráfego.
 
 Para mitigar essas limitações, o presente trabalho aborda o desenvolvimento de um sistema computacional concorrente embarcado para o controle e telemetria de um robô de inspeção autônoma de túneis. O problema central consiste em gerenciar, em tempo real, a concorrência e a sincronização de tarefas com diferentes restrições temporais (deadlines), divididas essencialmente em duas frentes integradas:
 
