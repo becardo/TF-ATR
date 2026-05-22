@@ -19,14 +19,12 @@
 void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     Odometria odo; 
 
-    // === VARIÁVEIS DA FÍSICA E DA DERIVADA - GEMINI===
     double velocidade_fisica = 0.0;
     double posicao_fisica = 0.0;
     int ultimo_metro_inteiro = 0;
     int distancia_anterior = 0;
     double dt = 0.02; // 20ms do timer
 
-    // VARIÁVEL LOCAL - GEMINI
     bool pulso_fisico_encoder = false;
 
     boost::asio::io_context io_odo;
@@ -57,7 +55,6 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
         double variacao_distancia = dist_x - distancia_anterior;
         double velocidade_medida = variacao_distancia / dt;
 
-        //if (dist_x != distancia_anterior) 
         {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
             std::cout << "[ODOMETRIA]: Distancia percorrida: " << dist_x << " m\n";
@@ -148,13 +145,13 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
 
         float media = filtro.calcular(valor_atual);
 
-        // PROTEÇÃO DE MEMÓRIA: Tranca a porta para atualizar o SensorBuffer
+        // Proteção: Tranca a porta para atualizar o SensorBuffer
         {
             std::lock_guard<std::mutex> lock_memoria(sensor.mtx_leituras);
             sensor.ultima_leitura_lidar = media;
         }
 
-        // PROTEÇÃO DE TELA: Imprime a medida atual para o usuário ver
+        // Proteção: Imprime a medida atual para o usuário ver
         {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
             std::cout << "[LIDAR] Medida atual: " << media << " m\n";
