@@ -66,9 +66,6 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
         // Atualiza a memória para o próximo ciclo de 20ms
         distancia_anterior = dist_x;
 
-        // Guarda a velocidade medida no buffer para a thread do PID ler
-        sensor.velocidade_real_medida = velocidade_medida;
-
         Medicao m;
         m.i_encoder = dist_x;
         // Timestamp simples para o coletor

@@ -9,7 +9,7 @@ void processamento_pesado_ia() {
     double resultado = 0.0;
     // Ajustei o número de iterações para chegar perto dos 30-40ms em CPUs modernas
     // Se ficar rápido demais no seu PC, aumente para 2000000
-    for (int i = 0; i < 1500000; ++i) {
+    for (int i = 0; i < 700000; ++i) {
         resultado += std::sin(i) * std::cos(i) * std::tan(i);
     }
     

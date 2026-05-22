@@ -25,7 +25,7 @@ float LidarFilter::calcular(float nova_leitura) {
     head = (head + 1) % window_size;
 
     // Função accumulate soma todos os itens da lista.
-    float soma = std::accumulate(buffer.begin(), buffer.end(), 0.0);
+    float soma = std::accumulate(buffer.begin(), buffer.end(), 0.0f);
 
     ultima_media = soma / window_size;
     
