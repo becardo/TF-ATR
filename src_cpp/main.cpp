@@ -16,6 +16,11 @@
 #include "Coletor.hpp"
 #include "Camera.hpp"
 
+void t_comunicacao_mqtt();
+
+NavBuffer nav;
+SensorBuffer sensor;
+
 // Thread responsável por ler os comandos (joystick/botoes) e definir o Setpoint
 // Roda ciclicamente a cada 80ms
 void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
@@ -111,9 +116,6 @@ void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
 int main() {
     std::cout << "Iniciando Sistema de Inspecao do Tunel...\n";
 
-    NavBuffer nav;
-    SensorBuffer sensor;
-
     std::thread th_comando(t_comando_navegacao, std::ref(nav), std::ref(sensor));
     
     std::thread th_controle(t_controle_navegacao, std::ref(nav), std::ref(sensor));
@@ -121,6 +123,7 @@ int main() {
     std::thread th_teto(t_reconstrucao_teto, std::ref(sensor));
     std::thread th_camera(t_inspecao_camera, std::ref(sensor));
     std::thread th_coletor(t_coletor_dados, std::ref(sensor));
+    std::thread thread_mqtt(t_comunicacao_mqtt); // NOVA: Comunicação MQTT
 
     th_comando.join();
     th_controle.join();
@@ -128,6 +131,7 @@ int main() {
     th_teto.join();
     th_camera.join();
     th_coletor.join();
+    thread_mqtt.detach(); // Roda livre em background
 
     return 0;
 }

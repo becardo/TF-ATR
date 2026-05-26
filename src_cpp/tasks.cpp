@@ -19,13 +19,13 @@
 void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     Odometria odo; 
 
-    double velocidade_fisica = 0.0;
-    double posicao_fisica = 0.0;
-    int ultimo_metro_inteiro = 0;
+    // double velocidade_fisica = 0.0;
+    // double posicao_fisica = 0.0;
+    // int ultimo_metro_inteiro = 0;
     int distancia_anterior = 0;
     double dt = 0.02; // 20ms do timer
 
-    bool pulso_fisico_encoder = false;
+    // bool pulso_fisico_encoder = false;
 
     boost::asio::io_context io_odo;
     boost::asio::steady_timer timer_odo(io_odo, boost::asio::chrono::milliseconds(20));
@@ -35,7 +35,7 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     loop_odo = ([&](const boost::system::error_code& erro) { 
         if(erro) return;
 
-        // Freando o robô no mundo real - Integração
+        /* // Freando o robô no mundo real - Integração
         double aceleracao = nav.o_aceleracao * 0.1; 
 
         velocidade_fisica += aceleracao * dt;
@@ -57,7 +57,7 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
 
         {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cout << "[ODOMETRIA]: Distancia percorrida: " << dist_x << " m\n";
+            // std::cout << "[ODOMETRIA]: Distancia percorrida: " << dist_x << " m\n";
         }
         
         // Atualiza a memória para o próximo ciclo de 20ms
@@ -83,7 +83,27 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
             sensor.fila_medicoes.push(m);
         }
 
-        sensor.cv_coletor.notify_one();
+        sensor.cv_coletor.notify_one(); */
+
+        int dist_atual = distancia_anterior;
+
+        // ZONA CRÍTICA: Lê a última distância que o MQTT jogou na fila
+        {
+            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+            dist_atual = sensor.ultimo_encoder_recebido;
+        }
+
+        // E substitua a fórmula de velocidade_medida por esta:
+        double velocidade_medida = ((dist_atual - distancia_anterior) / 1000.0) / dt;
+
+        // Salva a velocidade para o PID ler
+        {
+            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+            sensor.velocidade_real_medida = velocidade_medida;
+        }
+        
+        // Atualiza a memória para o próximo ciclo
+        distancia_anterior = dist_atual;
 
         timer_odo.expires_at(timer_odo.expiry() + boost::asio::chrono::milliseconds(20));
         timer_odo.async_wait(loop_odo);
@@ -100,7 +120,7 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
     // Inicializa o filtro com valor neutro
     for(int i = 0; i < 5; i++) { filtro.calcular(10.0f); }
 
-    std::vector<float> valores_teste;
+    /* std::vector<float> valores_teste;
     std::ifstream arquivo_teto("simulacao_superficie.csv");
     std::string linha;
 
@@ -130,7 +150,8 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
         valores_teste.push_back(10.0f);
     }
 
-    int indice_teste = 0;
+    int indice_teste = 0; */
+
     boost::asio::io_context io_lidar;
     boost::asio::steady_timer timer_lidar(io_lidar, boost::asio::chrono::milliseconds(100));
 
@@ -139,11 +160,13 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
     loop_lidar = ([&](const boost::system::error_code& erro){ 
         if(erro) return;
 
-        // Leitura do valor atual do vetor (circular)
+        float leitura_lidar_real = 10.0f;
+
+        /* // Leitura do valor atual do vetor (circular)
         float valor_atual = valores_teste[indice_teste];
         indice_teste = (indice_teste + 1) % valores_teste.size();
 
-        float media = filtro.calcular(valor_atual);
+        float media = filtro.calcular(valor_atual); 
 
         // Proteção: Tranca a porta para atualizar o SensorBuffer
         {
@@ -154,7 +177,15 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
         // Proteção: Imprime a medida atual para o usuário ver
         {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cout << "[LIDAR] Medida atual: " << media << " m\n";
+            // std::cout << "[LIDAR] Medida atual: " << media << " m\n";
+        } */
+
+        float media = filtro.calcular(leitura_lidar_real);
+
+        // ZONA CRÍTICA: Lê a medição que o MQTT recebeu do Python
+        {
+            std::lock_guard<std::mutex> lock_memoria(sensor.mtx_leituras);
+            leitura_lidar_real = sensor.ultima_leitura_lidar;
         }
 
         bool falha_detectada = false;
@@ -163,18 +194,18 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
 
         // Lógica de Detecção
         if (media > (altura_ideal + margem_erro)){
-            {
+            /* {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
             std::cout << "[LIDAR] FALHA: BURACO detectado! (Dist/Altura: " << media << "m)\n";
-            }
+            } */
             
             falha_detectada = true;
         }
         else if(media < (altura_ideal - margem_erro)){
-            {
+            /* {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cout << "[LIDAR] FALHA: SALIENCIA detectada! (Dist/Altura: " << media << "m)\n";
-            }
+            // std::cout << "[LIDAR] FALHA: SALIENCIA detectada! (Dist/Altura: " << media << "m)\n";
+            } */
             
             falha_detectada = true;
         }

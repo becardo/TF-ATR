@@ -52,6 +52,7 @@ struct SensorBuffer {
 
     float ultima_leitura_lidar = 10.0;
     double velocidade_real_medida = 0.0; // Variável para compartilhar com o PID
+    int ultimo_encoder_recebido = 0;
 };
 
 #endif
