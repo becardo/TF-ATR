@@ -12,8 +12,8 @@ class RobotPhysicsSimulator:
         self.velocidade_x = 0.0   
         self.aceleracao_x = 0.0   
         
-        # Parâmetros do cenário do túnel
-        self.comprimento_tunel = 100  
+        # Parâmetros do cenário estendido do túnel
+        self.comprimento_tunel = 1000  
         self.altura_nominal_teto = 10.0 
         self.ruido_desvio_padrao = 0.03 
         
@@ -24,39 +24,47 @@ class RobotPhysicsSimulator:
         num_pontos = int(self.comprimento_tunel / self.resolucao_mapa)
         perfil = [self.altura_nominal_teto] * num_pontos
         
-        # Injeção de anomalias geométricas no mapa do teto
-        # Saliência entre 10m e 12m
+        # --- BLOCO 1 DE ANOMALIAS (0m - 50m) ---
         idx_ini_sal, idx_fim_sal = int(10 / self.resolucao_mapa), int(12 / self.resolucao_mapa)
         for i in range(idx_ini_sal, idx_fim_sal):
             perfil[i] = 9.0
             
-        # Buraco entre 25m e 28m
         idx_ini_bur, idx_fim_bur = int(25 / self.resolucao_mapa), int(28 / self.resolucao_mapa)
         for i in range(idx_ini_bur, idx_fim_bur):
             perfil[i] = 11.2
 
-        # Deformação gradual (parábola) entre 45m e 50m
         idx_ini_sua, idx_fim_sua = int(45 / self.resolucao_mapa), int(50 / self.resolucao_mapa)
         for i in range(idx_ini_sua, idx_fim_sua):
             progresso = (i - idx_ini_sua) / (idx_fim_sua - idx_ini_sua)
             perfil[i] = 10.0 - 1.5 * math.sin(progresso * math.pi)
             
+       
+        idx_ini_b2, idx_fim_b2 = int(150 / self.resolucao_mapa), int(155 / self.resolucao_mapa)
+        for i in range(idx_ini_b2, idx_fim_b2):
+            perfil[i] = 11.5
+
+        # Adiciona uma zona densa de ondulações rítmicas de concreto entre 300m e 320m
+        idx_ini_ond, idx_fim_ond = int(300 / self.resolucao_mapa), int(320 / self.resolucao_mapa)
+        for i in range(idx_ini_ond, idx_fim_ond):
+            perfil[i] = 10.0 - 1.2 * math.sin(i * 0.5)
+
         return perfil
 
     def atualizar_física(self, nova_aceleracao):
         self.aceleracao_x = max(min(nova_aceleracao, 100.0), -100.0)
         
-        # Fator mecânico para simular a inércia do robô
+        # Fator mecânico de inércia
         aceleracao_real = self.aceleracao_x * 0.1 
         
-        # Integração numérica de Euler (V = V0 + a*dt)
+        # Equações diferenciais de movimento (V = V0 + a*dt)
         self.velocidade_x += aceleracao_real * self.dt
         if self.velocidade_x < 0.0: 
             self.velocidade_x = 0.0 
             
-        # Integração numérica de Euler (X = X0 + V*dt)
+        # Equações diferenciais de movimento (X = X0 + V*dt)
         self.posicao_x += self.velocidade_x * self.dt
         
+        # Proteção estrita de fim de curso (1000m)
         if self.posicao_x > self.comprimento_tunel:
             self.posicao_x = float(self.comprimento_tunel)
             self.velocidade_x = 0.0
@@ -79,7 +87,7 @@ class RobotPhysicsSimulator:
         }
 
 if __name__ == "__main__":
-    print("[TESTE FISICA] Iniciando simulação com controle temporal estável do Pygame...")
+    print("[TESTE FISICA] Iniciando simulação temporal estável (Túnel: 1000m)...")
     pygame.init()
     
     simulador = RobotPhysicsSimulator(dt=0.02)
@@ -87,18 +95,17 @@ if __name__ == "__main__":
     tempo_simulado = 0.0
     clock = pygame.time.Clock()
     
-    for _ in range(250): 
+    # Executa por 500 ciclos para dar tempo de o robô correr mais no túnel longo
+    for _ in range(500): 
         simulador.atualizar_física(aceleracao_mock)
         telemetria = simulador.obter_estado_telemetria()
         
-        # Mostra os dados a cada 500ms no console
         if int(tempo_simulado / 0.02) % 25 == 0:
             print(f"Tempo: {tempo_simulado:.2f}s | "
-                  f"Pos X: {telemetria['posicao_x']:>6}m | "
-                  f"Vel: {telemetria['velocidade_real']:>5} m/s | "
-                  f"LIDAR: {telemetria['leitura_lidar']}m")
+                  f"Pos X: {telemetria['posicao_x']:>7.2f}m | "
+                  f"Vel: {telemetria['velocidade_real']:>5.2f} m/s | "
+                  f"LIDAR: {telemetria['leitura_lidar']:.3f}m")
             
-        # Garante a taxa estável de 50 FPS (ciclos de 20ms) compensando atrasos internos
         clock.tick(50) 
         tempo_simulado += 0.02
         

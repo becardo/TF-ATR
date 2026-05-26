@@ -12,20 +12,11 @@
 #include "Lidar.hpp"
 #include "Odometria.hpp"
 
-/* Contém as threads responsáveis por ler a odometria e mapear o teto com LIDAR
-*/
-
-// --- Odometria: Produtor de dados de distância ---
+// --- Odometria: Calcula velocidade com base no Encoder do MQTT ---
 void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     Odometria odo; 
-
-    // double velocidade_fisica = 0.0;
-    // double posicao_fisica = 0.0;
-    // int ultimo_metro_inteiro = 0;
     int distancia_anterior = 0;
-    double dt = 0.02; // 20ms do timer
-
-    // bool pulso_fisico_encoder = false;
+    double dt = 0.02; // 20ms rígidos do timer
 
     boost::asio::io_context io_odo;
     boost::asio::steady_timer timer_odo(io_odo, boost::asio::chrono::milliseconds(20));
@@ -35,74 +26,24 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     loop_odo = ([&](const boost::system::error_code& erro) { 
         if(erro) return;
 
-        /* // Freando o robô no mundo real - Integração
-        double aceleracao = nav.o_aceleracao * 0.1; 
-
-        velocidade_fisica += aceleracao * dt;
-        if(velocidade_fisica < 0.0) velocidade_fisica = 0.0; // Impede o robô de dar ré
-        
-        posicao_fisica += velocidade_fisica * dt;
-
-        // Encoder só vira quando acumula 1 metro
-        if ((int)posicao_fisica > ultimo_metro_inteiro) {
-            pulso_fisico_encoder = !pulso_fisico_encoder;
-            ultimo_metro_inteiro = (int)posicao_fisica;
-        }
-
-        int dist_x = odo.atualizar(pulso_fisico_encoder);
-
-        // Derivação para encontrar a velocidade
-        double variacao_distancia = dist_x - distancia_anterior;
-        double velocidade_medida = variacao_distancia / dt;
-
-        {
-            std::lock_guard<std::mutex> lock_tela(mtx_console);
-            // std::cout << "[ODOMETRIA]: Distancia percorrida: " << dist_x << " m\n";
-        }
-        
-        // Atualiza a memória para o próximo ciclo de 20ms
-        distancia_anterior = dist_x;
-
-        Medicao m;
-        m.i_encoder = dist_x;
-        // Timestamp simples para o coletor
-        m.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        m.i_lidar = sensor.ultima_leitura_lidar;
-        m.nivel_confianca = 100; // Valor padrão inicial
-
-        {
-            // Tranca a porta para escrever a velocidade e ler o Lidar com segurança
-            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
-            sensor.velocidade_real_medida = velocidade_medida;
-            m.i_lidar = sensor.ultima_leitura_lidar; 
-        }
-
-        // ----- Zona Crítica: Guardar na fila para o Coletor -----
-        {
-            std::lock_guard<std::mutex> lock_fila(sensor.mtx_fila);
-            sensor.fila_medicoes.push(m);
-        }
-
-        sensor.cv_coletor.notify_one(); */
-
         int dist_atual = distancia_anterior;
 
-        // ZONA CRÍTICA: Lê a última distância que o MQTT jogou na fila
+        // ZONA CRÍTICA: Captura segura da última posição do encoder descarregada pelo MQTT
         {
             std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
             dist_atual = sensor.ultimo_encoder_recebido;
         }
 
-        // E substitua a fórmula de velocidade_medida por esta:
-        double velocidade_medida = ((dist_atual - distancia_anterior) / 1000.0) / dt;
+        // Cálculo derivativo da velocidade real (Delta X / Delta T) em metros
+        double velocidade_medida = (dist_atual - distancia_anterior) / dt;
 
-        // Salva a velocidade para o PID ler
+        // Salva a velocidade calculada para a thread do PID ler
         {
             std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
             sensor.velocidade_real_medida = velocidade_medida;
         }
         
-        // Atualiza a memória para o próximo ciclo
+        // Atualiza a memória de rastreamento para o próximo ciclo de 20ms
         distancia_anterior = dist_atual;
 
         timer_odo.expires_at(timer_odo.expiry() + boost::asio::chrono::milliseconds(20));
@@ -113,44 +54,12 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     io_odo.run();
 }
 
-// --- LIDAR / Reconstrução do teto: Identifica falhas e aciona a câmera ---
+// --- LIDAR / Reconstrução do teto: Processa média móvel e dispara Alarme ---
 void t_reconstrucao_teto(SensorBuffer& sensor) {
     LidarFilter filtro(5); 
 
-    // Inicializa o filtro com valor neutro
+    // Inicializa o histórico do filtro circular com a altura ideal
     for(int i = 0; i < 5; i++) { filtro.calcular(10.0f); }
-
-    /* std::vector<float> valores_teste;
-    std::ifstream arquivo_teto("simulacao_superficie.csv");
-    std::string linha;
-
-    // Tenta carregar o arquivo CSV
-    if (arquivo_teto.is_open()) {
-        while (std::getline(arquivo_teto, linha)) {
-            if(linha.empty()) continue;
-            try {
-                valores_teste.push_back(std::stof(linha));
-            } catch (...) { }
-        }
-        arquivo_teto.close();
-        {
-            std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cout << "[SISTEMA] Arquivo simulacao_superficie.csv carregado com " << valores_teste.size() << " leituras.\n";
-        }
-        
-    }
-
-    // Proteção: Se o arquivo falhou ou está vazio, garante que o programa não dê crash
-    if (valores_teste.empty()) {
-        {
-            std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cerr << "[AVISO] Arquivo de simulacao vazio ou nao encontrado. Usando teto plano.\n";
-        }
-        
-        valores_teste.push_back(10.0f);
-    }
-
-    int indice_teste = 0; */
 
     boost::asio::io_context io_lidar;
     boost::asio::steady_timer timer_lidar(io_lidar, boost::asio::chrono::milliseconds(100));
@@ -162,60 +71,41 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
 
         float leitura_lidar_real = 10.0f;
 
-        /* // Leitura do valor atual do vetor (circular)
-        float valor_atual = valores_teste[indice_teste];
-        indice_teste = (indice_teste + 1) % valores_teste.size();
-
-        float media = filtro.calcular(valor_atual); 
-
-        // Proteção: Tranca a porta para atualizar o SensorBuffer
-        {
-            std::lock_guard<std::mutex> lock_memoria(sensor.mtx_leituras);
-            sensor.ultima_leitura_lidar = media;
-        }
-
-        // Proteção: Imprime a medida atual para o usuário ver
-        {
-            std::lock_guard<std::mutex> lock_tela(mtx_console);
-            // std::cout << "[LIDAR] Medida atual: " << media << " m\n";
-        } */
-
-        float media = filtro.calcular(leitura_lidar_real);
-
-        // ZONA CRÍTICA: Lê a medição que o MQTT recebeu do Python
+        // CORREÇÃO: Captura o dado bruto da rede ANTES de passar pelo filtro
         {
             std::lock_guard<std::mutex> lock_memoria(sensor.mtx_leituras);
             leitura_lidar_real = sensor.ultima_leitura_lidar;
         }
 
+        // Processa o dado no Buffer Circular de Média Móvel para eliminar ruído gaussiano
+        float media = filtro.calcular(leitura_lidar_real);
+
         bool falha_detectada = false;
         float altura_ideal = 10.0f;
         float margem_erro = 0.5f;
 
-        // Lógica de Detecção
+        // Lógica de Detecção com logs protegidos para o console
         if (media > (altura_ideal + margem_erro)){
-            /* {
-            std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cout << "[LIDAR] FALHA: BURACO detectado! (Dist/Altura: " << media << "m)\n";
-            } */
-            
+            {
+                std::lock_guard<std::mutex> lock_tela(mtx_console);
+                std::cout << "[LIDAR] FALHA: BURACO detectado! (Média: " << media << "m)\n";
+            }
             falha_detectada = true;
         }
         else if(media < (altura_ideal - margem_erro)){
-            /* {
-            std::lock_guard<std::mutex> lock_tela(mtx_console);
-            // std::cout << "[LIDAR] FALHA: SALIENCIA detectada! (Dist/Altura: " << media << "m)\n";
-            } */
-            
+            {
+                std::lock_guard<std::mutex> lock_tela(mtx_console);
+                std::cout << "[LIDAR] FALHA: SALIENCIA detectada! (Média: " << media << "m)\n";
+            }
             falha_detectada = true;
         }
 
-        // Se achou uma falha, aciona o Alarme e sinaliza o Slowdown
+        // Disparo reativo do alarme por software para a Câmera e Slowdown
         if (falha_detectada) {
             {
                 std::lock_guard<std::mutex> lock_camera(sensor.mtx_camera);
-                sensor.e_inspecao = true;     // Ativa o Slowdown no NavigationManager
-                sensor.o_liga_camera = true;  // Acorda a thread da Câmera
+                sensor.e_inspecao = true;     
+                sensor.o_liga_camera = true;  
             } 
             sensor.cv_camera.notify_one(); 
         }

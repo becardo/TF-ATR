@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import pygame
 import paho.mqtt.client as mqtt
-
 from robot_physics import RobotPhysicsSimulator
 
 # Variáveis Globais de Controle de Rede MQTT
@@ -18,40 +17,38 @@ def ao_receber_mensagem(client, userdata, msg):
     elif topico == "tunel/status/inspecao":
         status_inspecao = int(payload)
 
-# Loop MQTT + FÍSICA
 if __name__ == "__main__":
     print("[SISTEMA] Inicializando Ponte MQTT com a Física do Robô...")
     pygame.init()
     
-    # Setup da Rede
-    cliente_mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2) # Instancia o cliente usando API V2
-    cliente_mqtt.on_message = ao_receber_mensagem # Pluga a função na biblioteca
-    cliente_mqtt.connect("localhost", 1883, 60) # Conecta no Broker local, porta 1883, timeout de 60 segundos
+    cliente_mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    cliente_mqtt.on_message = ao_receber_mensagem
+    cliente_mqtt.connect("localhost", 1883, 60)
     
-    # Escuta do front-end
     cliente_mqtt.subscribe("tunel/cmd/aceleracao")
     cliente_mqtt.subscribe("tunel/status/inspecao")
-    cliente_mqtt.loop_start() # Start da Thread na Rede
+    cliente_mqtt.loop_start()
     
-    # Instanciando a classe RobotPhysicsSimulator
     simulador = RobotPhysicsSimulator(dt=0.02)
     tempo_simulado = 0.0
+    ultima_pos_enviada = -1.0 # Controle de vazão de rede
     clock = pygame.time.Clock()
     
     print("[OK] Conectado ao Broker Mosquitto. Aguardando dados do Back-end C++...")
     
     try:
         while True:
-            telemetria = simulador.obter_estado_telemetria() # Lê a física
+            telemetria = simulador.obter_estado_telemetria()
+            pos_atual = int(telemetria["posicao_x"])
             
-            # Publica a física no MQTT para o C++
-            cliente_mqtt.publish("tunel/sensor/encoder", int(telemetria["posicao_x"]*1000))
-            cliente_mqtt.publish("tunel/sensor/lidar", float(telemetria["leitura_lidar"]))
+            # Só inunda a rede com publicação se o robô se mover no eixo X (Filtro de QoS)
+            if pos_atual != ultima_pos_enviada:
+                cliente_mqtt.publish("tunel/sensor/encoder", pos_atual)
+                cliente_mqtt.publish("tunel/sensor/lidar", float(telemetria["leitura_lidar"]))
+                ultima_pos_enviada = pos_atual
             
-            # Atualiza a engine com o cálculo do C++
             simulador.atualizar_física(aceleracao_recebida_cpp)
             
-            # Imprime os resultados no terminal
             if int(tempo_simulado / 0.02) % 25 == 0:
                 alerta = "ALARME!" if status_inspecao == 1 else " OK"
                 print(f"Tempo: {tempo_simulado:.2f}s | "

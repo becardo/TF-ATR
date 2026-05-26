@@ -33,7 +33,7 @@ As comunicações que existem no nosso código, entre o Python e o shared_buffer
 Biblioteca oficial do Paho. Instale a biblioteca forçando a permissão:
 
 ```bash
-pip3 install paho-mqtt --break-system-packages
+
 ```
 
 -> arquivo teste_mqtt.py criado
