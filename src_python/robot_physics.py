@@ -13,7 +13,7 @@ class RobotPhysicsSimulator:
         self.aceleracao_x = 0.0   
         
         # Parâmetros do cenário estendido do túnel
-        self.comprimento_tunel = 1000  
+        self.comprimento_tunel = 100  
         self.altura_nominal_teto = 10.0 
         self.ruido_desvio_padrao = 0.03 
         
@@ -39,14 +39,14 @@ class RobotPhysicsSimulator:
             perfil[i] = 10.0 - 1.5 * math.sin(progresso * math.pi)
             
        
-        idx_ini_b2, idx_fim_b2 = int(150 / self.resolucao_mapa), int(155 / self.resolucao_mapa)
-        for i in range(idx_ini_b2, idx_fim_b2):
-            perfil[i] = 11.5
+        # idx_ini_b2, idx_fim_b2 = int(150 / self.resolucao_mapa), int(155 / self.resolucao_mapa)
+        # for i in range(idx_ini_b2, idx_fim_b2):
+        #    perfil[i] = 11.5
 
         # Adiciona uma zona densa de ondulações rítmicas de concreto entre 300m e 320m
-        idx_ini_ond, idx_fim_ond = int(300 / self.resolucao_mapa), int(320 / self.resolucao_mapa)
-        for i in range(idx_ini_ond, idx_fim_ond):
-            perfil[i] = 10.0 - 1.2 * math.sin(i * 0.5)
+        # idx_ini_ond, idx_fim_ond = int(300 / self.resolucao_mapa), int(320 / self.resolucao_mapa)
+        # for i in range(idx_ini_ond, idx_fim_ond):
+        #     perfil[i] = 10.0 - 1.2 * math.sin(i * 0.5)
 
         return perfil
 
@@ -68,6 +68,7 @@ class RobotPhysicsSimulator:
         if self.posicao_x > self.comprimento_tunel:
             self.posicao_x = float(self.comprimento_tunel)
             self.velocidade_x = 0.0
+            self.aceleracao_x = 0.0
 
     def ler_sensor_lidar(self):
         indice = int(self.posicao_x / self.resolucao_mapa)

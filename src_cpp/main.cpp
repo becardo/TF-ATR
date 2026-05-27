@@ -97,7 +97,7 @@ void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         double saida_aceleracao = pid.compute(static_cast<double>(setpoint_atual), velocidade_atual_robo);
 
         // CORREÇÃO: Trava de segurança para fim de curso do túnel estendido de 1000 metros
-        if (posicao_atual_encoder >= 1000) {
+        if (posicao_atual_encoder >= 100) {
             saida_aceleracao = 0.0;
             pid.reset();
         }
