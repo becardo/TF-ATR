@@ -48,8 +48,7 @@ sudo apt install libpaho-mqtt-dev
 
 6. Executar: 
 
-- Rodar um ``` make ```. Acionat a tela dupla, com tmux: 
-- terminal da esquerda (C++): ``` ./inspecao_tuneis ```
-- terminal da direita (Python): ``` python3 src_python/py_mqtt.py ```
+- Rodar um ``` mchmod +x run.sh ``` uma vez
+- terminal: ``` ./run.sh ```
 
-Assim que o Python iniciar, a simulação começará. O Python enviará a telemetria, o C++ responderá com a aceleração calculada, e o robô irá estabilizando a velocidade e freando automaticamente ao detectar falhas no teto. 
+Isso irá executar c++ e o python ao mesmo tempo. Quando chegar em 100m, velocidade e aceleração ficam 0. FLAGS continuam como um estado de "carro parado".
