@@ -4,10 +4,9 @@ import paho.mqtt.client as mqtt
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, 
                              QVBoxLayout, QPushButton, QFrame, QLabel, 
                              QSplitter, QSpinBox, QGroupBox, QFormLayout)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QObject
 
 # Classe auxiliar para emitir sinais do MQTT de forma segura para a Thread da GUI do PyQt
-# Impede condições de corrida e travamentos ao atualizar elementos visuais
 class SinaisMQTT(QObject):
     dados_recebidos = pyqtSignal(str, str)
 
@@ -88,7 +87,7 @@ class GUIOperacaoRemota(QMainWindow):
         layout_vel.addWidget(QLabel("Sp Velocidade (m/s):"))
         self.sp_velocidade = QSpinBox()
         self.sp_velocidade.setRange(0, 20)
-        self.sp_velocidade.setValue(5) # Valor idêntico ao mock do main.cpp
+        self.sp_velocidade.setValue(5) 
         layout_comandos.addLayout(layout_vel)
 
         # Botões de Direção e Movimentação
@@ -96,12 +95,10 @@ class GUIOperacaoRemota(QMainWindow):
         self.btn_direita = QPushButton("Direita ▶")
         self.btn_para = QPushButton("■ PARAR (Emergência)")
         
-        # Conexão dos eventos de clique às funções de transmissão MQTT
         self.btn_esquerda.clicked.connect(lambda: self.publicar_direcao("ESQUERDA"))
         self.btn_direita.clicked.connect(lambda: self.publicar_direcao("DIREITA"))
         self.btn_para.clicked.connect(lambda: self.publicar_direcao("PARAR"))
 
-        # Estilização do botão de Parada Crítica
         self.btn_para.setStyleSheet("background-color: #d9534f; color: white; font-weight: bold; height: 35px;")
 
         layout_comandos.addWidget(self.btn_esquerda)
@@ -154,9 +151,9 @@ class GUIOperacaoRemota(QMainWindow):
         try:
             self.cliente_mqtt.connect("localhost", 1883, 60)
             
-            # Tópicos vindos da Física (Python) e do Controle de Tempo Real (C++)
             self.cliente_mqtt.subscribe("tunel/sensor/encoder")
             self.cliente_mqtt.subscribe("tunel/sensor/lidar")
+            self.cliente_mqtt.subscribe("tunel/sensor/velocidade") # CORREÇÃO: Assina o tópico de velocidade
             self.cliente_mqtt.subscribe("tunel/cmd/aceleracao")
             self.cliente_mqtt.subscribe("tunel/status/inspecao")
             
@@ -166,7 +163,6 @@ class GUIOperacaoRemota(QMainWindow):
             print(f"[ERRO GUI MQTT] Não foi possível conectar ao Broker: {e}")
 
     def ao_receber_mensagem(self, client, userdata, msg):
-        # Transmite a mensagem recebida na Thread de Rede para a Thread Principal da GUI
         topico = msg.topic
         payload = msg.payload.decode()
         self.sinais.dados_recebidos.emit(topico, payload)
@@ -180,6 +176,10 @@ class GUIOperacaoRemota(QMainWindow):
         elif topico == "tunel/sensor/lidar":
             self.ultimo_lidar = float(payload)
             self.lbl_lidar.setText(f"{self.ultimo_lidar:.2f} m")
+
+        elif topico == "tunel/sensor/velocidade": # CORREÇÃO: Trata a atualização de texto da velocidade
+            self.ultima_velocidade = float(payload)
+            self.lbl_velocidade.setText(f"{self.ultima_velocidade:.2f} m/s")
             
         elif topico == "tunel/cmd/aceleracao":
             self.ultima_aceleracao = float(payload)
@@ -197,32 +197,30 @@ class GUIOperacaoRemota(QMainWindow):
     # =================================================================
     # 4. TRANSMISSÃO DE COMANDOS DA GUI PARA A REDE
     # =================================================================
+    def publish_mqtt_data(self, topic, payload):
+        self.cliente_mqtt.publish(topic, payload)
+
     def publicar_comando(self, tipo, valor):
-        """ Trata alternâncias de estado como Auto/Manual """
         if valor == "AUTOMATICO":
             self.lbl_modo.setText("AUTOMÁTICO")
             self.lbl_modo.setStyleSheet("color: darkorange; font-weight: bold; font-size: 14px;")
-            self.cliente_mqtt.publish("tunel/controle/modo", "AUTO")
+            self.publish_mqtt_data("tunel/controle/modo", "AUTO")
         else:
             self.lbl_modo.setText("MANUAL")
             self.lbl_modo.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
-            self.cliente_mqtt.publish("tunel/controle/modo", "MANUAL")
+            self.publish_mqtt_data("tunel/controle/modo", "MANUAL")
             
-        # Publica o Setpoint de Velocidade ajustado no seletor numérico
-        self.cliente_mqtt.publish("tunel/controle/sp_velocidade", str(self.sp_velocidade.value()))
+        self.publish_mqtt_data("tunel/controle/sp_velocidade", str(self.sp_velocidade.value()))
 
     def publicar_direcao(self, comando):
-        """ Envia comandos de direção com base nos botões de navegação """
         print(f"[GUI COMANDO] Enviando ação de movimentação: {comando}")
-        self.cliente_mqtt.publish("tunel/controle/direcao", comando)
+        self.publish_mqtt_data("tunel/controle/direcao", comando)
         
-        # Se for pressionado PARAR, força o setpoint visível para zero imediatamente
         if comando == "PARAR":
             self.sp_velocidade.setValue(0)
-            self.cliente_mqtt.publish("tunel/controle/sp_velocidade", "0.0")
+            self.publish_mqtt_data("tunel/controle/sp_velocidade", "0.0")
 
     def closeEvent(self, event):
-        """ Garante o encerramento correto do loop de rede ao fechar a janela """
         self.cliente_mqtt.loop_stop()
         self.cliente_mqtt.disconnect()
         event.accept()

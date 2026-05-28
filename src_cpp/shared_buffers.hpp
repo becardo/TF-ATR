@@ -5,8 +5,7 @@
 #include <condition_variable>
 #include <queue>
 
-/* 
-Define os Buffers, Mutexes, Filas e Variáveis de Condição que permitem
+/* Define os Buffers, Mutexes, Filas e Variáveis de Condição que permitem
 a comunicação segura entre as múltiplas threads do sistema. Garante a
 exclusão mútua nas zonas críticas, evitando condições de corrida.
 */
@@ -19,7 +18,7 @@ inline std::mutex mtx_console;
 struct NavBuffer {
     double j_sp_velocidade = 0.0; // Velocidade alvo solicitada (m/s)
     double o_aceleracao = 0.0;          // Esforço do controle calculado pelo PID
-    bool e_automatico = false;// Estado de operação (Manual ou Auto)
+    bool e_automatico = false; // Estado de operação (Manual ou Auto)
     std::mutex mtx;              // O cadeado do PID
 };
 
@@ -47,12 +46,16 @@ struct SensorBuffer {
     bool e_inspecao = false; // FLAG que indica se o teto tem buracos
     std::mutex mtx_camera;        // Cadeado para proteger a alteração da FLAG
 
-    bool o_liga_camera = false; // Variável de Condição para a Câmera 
+    bool o_liga_camera = false; // Variável de Condição para a Câmera
     std::condition_variable cv_camera; // O alarme da câmera
 
-    float ultima_leitura_lidar = 10.0;
-    double velocidade_real_medida = 0.0; // Variável para compartilhar com o PID
+    float ultima_leitura_lidar = 10.0f;
+    double velocidade_real_medida = 0.0; // RESTABELECIDO: Variável compartilhada com o PID e MQTT
     int ultimo_encoder_recebido = 0;
+
+    // ----- Flags de Sincronismo MQTT -----
+    bool python_conectado = false; // Controla o Handshake de largada inicial com a GUI
+    bool simulo_concluida = false; // Sinaliza o fim de curso (Parada geral aos 1000m)
 };
 
-#endif
+#endif // SHARED_BUFFERS_HPP
