@@ -239,12 +239,24 @@ class GUIOperacaoRemota(QMainWindow):
             self.lbl_modo.setText("AUTOMÁTICO")
             self.lbl_modo.setStyleSheet("color: darkorange; font-weight: bold; font-size: 14px;")
             self.lbl_telemetria_sp.setText("5 m/s")
+
+            # Desabilita o SetPoint de velocidade, e botões de esquerda e direita
+            self.sp_velocidade.setEnabled(False)
+            self.btn_esquerda.setEnabled(False)
+            self.btn_direita.setEnabled(False)
+
             self.publish_mqtt_data("tunel/controle/modo", "AUTO")
         else:
             self.modo_comando = "0"
             self.lbl_modo.setText("MANUAL")
             self.lbl_modo.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
             self.lbl_telemetria_sp.setText(f"{self.sp_velocidade.value()} m/s")
+
+            # Habilita os botões e o setpoint
+            self.sp_velocidade.setEnabled(True)
+            self.btn_esquerda.setEnabled(True)
+            self.btn_direita.setEnabled(True)
+
             self.publish_mqtt_data("tunel/controle/modo", "MANUAL")
             
         self.btn_iniciar.setEnabled(True) # habilita o botão Iniciar
@@ -268,6 +280,10 @@ class GUIOperacaoRemota(QMainWindow):
         # Só permite pilotar se o sistema já tiver sido iniciado
         if self.btn_iniciar.isEnabled(): 
             return # Se o botão ainda está ativado, o robô está em Standby
+        
+        # Ignora as setas do teclado se estiver no modo automático
+        if self.modo_pendente == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
+            return
 
         if event.key() == Qt.Key.Key_Right:
             self.publish_direcao("DIREITA")
@@ -277,16 +293,23 @@ class GUIOperacaoRemota(QMainWindow):
             self.publish_direcao("ESQUERDA")
             self.btn_esquerda.setDown(True)
             
-        elif event.key() == Qt.Key.Key_Space: # SPACEBAR = FREIO DE EMERGÊNCIA
+        elif event.key() == Qt.Key.Key_Space: # spacebar = parar
             self.publish_direcao("PARAR")
             self.btn_para.setDown(True)
 
     def keyReleaseEvent(self, event):
         # Levanta os botões na tela quando o usuário solta a tecla
+        if self.modo_pendente == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
+            return
+        
         if event.key() == Qt.Key.Key_Right:
             self.btn_direita.setDown(False)
+            self.publish_direcao("PARAR") # Para o robo quando a tecla deixa de ser pressionada 
+
         elif event.key() == Qt.Key.Key_Left:
             self.btn_esquerda.setDown(False)
+            self.publish_direcao("PARAR")
+
         elif event.key() == Qt.Key.Key_Space:
             self.btn_para.setDown(False)
 
