@@ -34,19 +34,38 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     loop_comando = ([&](const boost::system::error_code& erro){
         if(erro) return;
 
-        // ----- Mock de entradas -----
-        bool c_automatico = false; 
-        bool c_man = true;         
-        bool c_para = false;       
-
-        double velocidade_joystick = 5.0; 
-
         bool em_inspecao = false;
         {
             // Bloqueia o mutex da câmera apenas para ler a flag de alarme
             std::lock_guard<std::mutex> lock(sensor.mtx_camera);
             em_inspecao = sensor.e_inspecao;
         }
+
+        // ----- Mock de entradas -----
+        bool iniciado = false;
+        bool c_automatico = false; 
+        bool c_man = true;         
+        bool c_para = false;       
+        double velocidade_joystick = 5.0; 
+
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            iniciado = nav.sistema_iniciado;
+            c_automatico = nav.e_automatico;
+            c_man = nav.c_man;
+            c_para = nav.c_para;
+            velocidade_joystick = nav.velocidade_joystick;
+        }
+
+        // Intercepçao:
+        if (!iniciado) {
+            velocidade_joystick = 0.0;
+            c_para = true; // Mantém o freio puxado
+        }
+
+        // Passa para o NavigationManager processar
+        nav_manager.updateMode(c_automatico, c_man);
+        nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);
 
         // Processamento da lógica de estado da navegação
         nav_manager.updateMode(c_automatico, c_man);
@@ -119,6 +138,8 @@ void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     timer_PID_nav.async_wait(loop_PID);
     io_PID_nav.run();
 }
+
+
 
 int main() {
     std::cout << "Iniciando Sistema de Inspecao do Tunel (Módulos Integrados via MQTT)...\n";

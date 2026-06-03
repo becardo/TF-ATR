@@ -16,14 +16,12 @@ extern NavBuffer nav;
 
 volatile bool python_reconhecido = false;
 
-// ====================================================================
-// CALLBACK: Processamento de dados recebidos da rede MQTT
-// ====================================================================
+// Processamento de dados recebidos da rede MQTT
 int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient_message *message) {
     std::string topico(topicName);
     std::string payload((char*)message->payload, message->payloadlen);
 
-    // 1. CHECAGEM DE STATUS E SINCRONISMO (HANDSHAKE E FIM DE CURSO)
+    // Checagem de status
     if (topico == "tunel/sistema/status") {
         if (payload == "PYTHON_READY") {
             std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
@@ -37,18 +35,25 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
             std::cout << "[FIM DE CURSO] Sinal 'SIMULACAO_CONCLUIDA' recebido do Python!\n";
         }
     }
-    // 2. RECEPÇÃO DE COMANDOS VINDOS DA INTERFACE GRÁFICA (GUI)
+    // Recebe comandos do GUI
     else if (topico == "tunel/controle/modo") {
         std::lock_guard<std::mutex> lock(nav.mtx);
-        nav.e_automatico = (payload == "AUTO");
-        std::cout << "[GUI-IN] Alteração de Modo: " << payload << "\n";
+        if (payload == "AUTO") {
+            nav.c_automatico = true;
+            nav.c_man = false;
+        } else {
+            nav.c_automatico = false;
+            nav.c_man = true;
+        }
     }
     else if (topico == "tunel/controle/sp_velocidade") {
         std::lock_guard<std::mutex> lock(nav.mtx);
-        nav.j_sp_velocidade = std::stof(payload);
-        std::cout << "[GUI-IN] Novo Setpoint de Velocidade: " << payload << " m/s\n";
+        try {
+            nav.j_sp_velocidade = std::stof(payload);
+            std::cout << "[GUI-IN] Novo Setpoint de Velocidade: " << payload << " m/s\n";
+        } catch (...) { /* Ignora se vier lixo */ }
     }
-    // 3. RECEPÇÃO DE DADOS DINÂMICOS DA FÍSICA
+    // Recebe os dados físicos
     else if (topico == "tunel/sensor/encoder") {
         int leitura_encoder = std::stoi(payload);
         
@@ -75,15 +80,35 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
             sensor.ultima_leitura_lidar = leitura_lidar;
         }
     }
+    else if (topico == "tunel/controle/direcao") {
+        std::lock_guard<std::mutex> lock(nav.mtx);
+        if (payload == "DIREITA") {
+            nav.c_para = false;
+            if (nav.velocidade_joystick < 0) nav.velocidade_joystick *= -1; // Garante ir pra frente
+        } 
+        else if (payload == "ESQUERDA") {
+            nav.c_para = false;
+            if (nav.velocidade_joystick > 0) nav.velocidade_joystick *= -1; // Dá ré
+        } 
+        else if (payload == "PARAR") {
+            nav.c_para = true;
+            nav.velocidade_joystick = 0.0;
+        }
+    }
+    else if (topico == "tunel/cmd/iniciar") { // Botão iniciar
+        std::lock_guard<std::mutex> lock_nav(nav.mtx);
+        if (payload == "1") {
+            nav.sistema_iniciado = true;
+            std::cout << "[MQTT-IN] Comando INICIAR recebido!\n";
+        }
+    }
 
     MQTTClient_freeMessage(&message);
     MQTTClient_free(topicName);
     return 1;
 }
 
-// ====================================================================
-// THREAD PRINCIPAL DE COMUNICAÇÃO MQTT
-// ====================================================================
+// Thread de comunicação MQTT
 void t_comunicacao_mqtt(){
     
     MQTTClient client;
@@ -108,8 +133,9 @@ void t_comunicacao_mqtt(){
     MQTTClient_subscribe(client, "tunel/controle/modo", 1);
     MQTTClient_subscribe(client, "tunel/controle/sp_velocidade", 1);
     MQTTClient_subscribe(client, "tunel/controle/direcao", 1);
+    MQTTClient_subscribe(client, "tunel/cmd/iniciar", 1);
 
-    // ---- BLOCO DE HANDSHAKE ----
+    // Handshake
     while (!python_reconhecido) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -145,7 +171,7 @@ void t_comunicacao_mqtt(){
         int controle_status_alarme;
         double velocidade_atual_calculada;
 
-        // Captura segura das variáveis de controle e odometria
+        // Captura das variáveis de controle e odometria
         {
             std::lock_guard<std::mutex> lock_nav(nav.mtx);
             controle_pid_aceleracao = nav.o_aceleracao;
@@ -159,7 +185,7 @@ void t_comunicacao_mqtt(){
             velocidade_atual_calculada = sensor.velocidade_real_medida;
         }
 
-        // --- PUBLICAÇÕES PARA A REDE ---
+        // Publicações
         // Publica a aceleração para o simulador do Python rodar a física
         std::string payload_accel = std::to_string(controle_pid_aceleracao);
         MQTTClient_message msg1 = MQTTClient_message_initializer;
@@ -176,7 +202,7 @@ void t_comunicacao_mqtt(){
         msg2.qos = 1; msg2.retained = 0;
         MQTTClient_publishMessage(client, "tunel/status/inspecao", &msg2, NULL);
 
-        // CORREÇÃO: Publica a velocidade derivada pela odometria C++ para a GUI sair do zero
+        // Publica a velocidade derivada pela odometria C++ para a GUI sair do zero
         std::string payload_vel = std::to_string(velocidade_atual_calculada);
         MQTTClient_message msg3 = MQTTClient_message_initializer;
         msg3.payload = (void*)payload_vel.c_str();
@@ -195,6 +221,7 @@ void t_comunicacao_mqtt(){
     MQTTClient_unsubscribe(client, "tunel/controle/sp_velocidade");
     MQTTClient_unsubscribe(client, "tunel/controle/direcao");
     MQTTClient_unsubscribe(client, "tunel/sistema/status");
+    MQTTClient_subscribe(client, "tunel/cmd/iniciar", 1);
     
     MQTTClient_disconnect(client, 5000);
     MQTTClient_destroy(&client);

@@ -4,7 +4,7 @@ import paho.mqtt.client as mqtt
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, 
                              QVBoxLayout, QPushButton, QFrame, QLabel, 
                              QSplitter, QSpinBox, QGroupBox, QFormLayout)
-from PyQt6.QtCore import Qt, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
 
 # Classe auxiliar para emitir sinais do MQTT de forma segura para a Thread da GUI do PyQt
 class SinaisMQTT(QObject):
@@ -27,12 +27,18 @@ class GUIOperacaoRemota(QMainWindow):
         self.ultima_aceleracao = 0.0
         self.status_inspecao = 0
 
+        self.modo_pendente = "0"
+
+        # O cronômetro que vai salvar a vida da interface
+        self.timer_tela = QTimer()
+        self.timer_tela.timeout.connect(self.atualizar_tela)
+        self.timer_tela.start(100) # Atualiza a tela a cada 100ms (10 FPS)
+
         # Inicializa Layout e Conexões MQTT
         self.init_ui()
         self.init_mqtt()
 
     def init_ui(self):
-        # --- WIDGET CENTRAL ---
         widget_central = QWidget()
         self.setCentralWidget(widget_central)
         layout_principal = QHBoxLayout(widget_central)
@@ -76,11 +82,17 @@ class GUIOperacaoRemota(QMainWindow):
         layout_modos = QHBoxLayout()
         self.btn_modo_auto = QPushButton("Automático")
         self.btn_modo_man = QPushButton("Manual")
-        self.btn_modo_auto.clicked.connect(lambda: self.publicar_comando("modo", "AUTOMATICO"))
-        self.btn_modo_man.clicked.connect(lambda: self.publicar_comando("modo", "MANUAL"))
+        self.btn_modo_auto.clicked.connect(lambda: self.publish_comando("modo", "AUTOMATICO"))
+        self.btn_modo_man.clicked.connect(lambda: self.publish_comando("modo", "MANUAL"))
         layout_modos.addWidget(self.btn_modo_auto)
         layout_modos.addWidget(self.btn_modo_man)
         layout_comandos.addLayout(layout_modos)
+
+        # Botão Iniciar
+        self.btn_iniciar = QPushButton("Iniciar")
+        self.btn_iniciar.setEnabled(False) # botão Iniciar começa desabilitado
+        self.btn_iniciar.clicked.connect(self.publish_iniciar)
+        layout_comandos.addWidget(self.btn_iniciar)
 
         # Setpoint de Velocidade (Alvo para o PID no C++)
         layout_vel = QHBoxLayout()
@@ -95,9 +107,9 @@ class GUIOperacaoRemota(QMainWindow):
         self.btn_direita = QPushButton("Direita ▶")
         self.btn_para = QPushButton("■ PARAR (Emergência)")
         
-        self.btn_esquerda.clicked.connect(lambda: self.publicar_direcao("ESQUERDA"))
-        self.btn_direita.clicked.connect(lambda: self.publicar_direcao("DIREITA"))
-        self.btn_para.clicked.connect(lambda: self.publicar_direcao("PARAR"))
+        self.btn_esquerda.clicked.connect(lambda: self.publish_direcao("ESQUERDA"))
+        self.btn_direita.clicked.connect(lambda: self.publish_direcao("DIREITA"))
+        self.btn_para.clicked.connect(lambda: self.publish_direcao("PARAR"))
 
         self.btn_para.setStyleSheet("background-color: #d9534f; color: white; font-weight: bold; height: 35px;")
 
@@ -168,39 +180,46 @@ class GUIOperacaoRemota(QMainWindow):
         self.sinais.dados_recebidos.emit(topico, payload)
 
     def processar_atualizacao_gui(self, topico, payload):
-        """ Atualiza os elementos visuais de telemetria na Thread da Interface """
+        """ Apenas salva os valores na memória na velocidade da luz, sem travar a tela """
         if topico == "tunel/sensor/encoder":
             self.ultimo_encoder = int(payload)
-            self.lbl_encoder.setText(f"{self.ultimo_encoder} m")
-            
         elif topico == "tunel/sensor/lidar":
             self.ultimo_lidar = float(payload)
-            self.lbl_lidar.setText(f"{self.ultimo_lidar:.2f} m")
-
-        elif topico == "tunel/sensor/velocidade": # CORREÇÃO: Trata a atualização de texto da velocidade
+        elif topico == "tunel/sensor/velocidade":
             self.ultima_velocidade = float(payload)
-            self.lbl_velocidade.setText(f"{self.ultima_velocidade:.2f} m/s")
-            
         elif topico == "tunel/cmd/aceleracao":
             self.ultima_aceleracao = float(payload)
-            self.lbl_aceleracao.setText(f"{self.ultima_aceleracao:.2f} m/s²")
-            
         elif topico == "tunel/status/inspecao":
             self.status_inspecao = int(payload)
-            if self.status_inspecao == 1:
-                self.lbl_inspecao.setText("⚠️ ALARME: FALHA DETECTADA")
-                self.lbl_inspecao.setStyleSheet("color: red; font-weight: bold; font-size: 14px;")
-            else:
-                self.lbl_inspecao.setText("✓ TETO INTEGRAL")
-                self.lbl_inspecao.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
+
+    def atualizar_tela(self):
+        """ Chamada pelo QTimer 10x por segundo para atualizar os textos de uma vez só """
+        self.lbl_encoder.setText(f"{self.ultimo_encoder} m")
+        self.lbl_lidar.setText(f"{self.ultimo_lidar:.2f} m")
+        self.lbl_velocidade.setText(f"{self.ultima_velocidade:.2f} m/s")
+        self.lbl_aceleracao.setText(f"{self.ultima_aceleracao:.2f} m/s²")
+        
+        if self.status_inspecao == 1:
+            self.lbl_inspecao.setText("ALARME: FALHA DETECTADA")
+            self.lbl_inspecao.setStyleSheet("color: red; font-weight: bold; font-size: 14px;")
+        else:
+            self.lbl_inspecao.setText("TETO INTEGRAL")
+            self.lbl_inspecao.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
 
     # =================================================================
     # 4. TRANSMISSÃO DE COMANDOS DA GUI PARA A REDE
     # =================================================================
+    def publish_iniciar( self):
+        self.btn_iniciar.setText("INICIAR")
+        self.publish_mqtt_data("tunel/cmd/modo", self.modo_pendente)
+        self.publish_mqtt_data("tunel/cmd/iniciar", "1")
+        self.btn_iniciar.setEnabled(False)
+
+
     def publish_mqtt_data(self, topic, payload):
         self.cliente_mqtt.publish(topic, payload)
 
-    def publicar_comando(self, tipo, valor):
+    def publish_comando(self, tipo, valor):
         if valor == "AUTOMATICO":
             self.lbl_modo.setText("AUTOMÁTICO")
             self.lbl_modo.setStyleSheet("color: darkorange; font-weight: bold; font-size: 14px;")
@@ -210,9 +229,10 @@ class GUIOperacaoRemota(QMainWindow):
             self.lbl_modo.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
             self.publish_mqtt_data("tunel/controle/modo", "MANUAL")
             
+        self.btn_iniciar.setEnabled(True) # habilita o botão Iniciar
         self.publish_mqtt_data("tunel/controle/sp_velocidade", str(self.sp_velocidade.value()))
 
-    def publicar_direcao(self, comando):
+    def publish_direcao(self, comando):
         print(f"[GUI COMANDO] Enviando ação de movimentação: {comando}")
         self.publish_mqtt_data("tunel/controle/direcao", comando)
         

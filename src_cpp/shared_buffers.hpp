@@ -19,6 +19,12 @@ struct NavBuffer {
     double j_sp_velocidade = 0.0; // Velocidade alvo solicitada (m/s)
     double o_aceleracao = 0.0;          // Esforço do controle calculado pelo PID
     bool e_automatico = false; // Estado de operação (Manual ou Auto)
+
+    bool sistema_iniciado = false; // O robô inicia parado
+    bool c_automatico = false;     // Comando de modo Automático
+    bool c_man = true;             // Comando de modo Manual (nasce como padrão)
+    bool c_para = false;           // Comando de parada de emergência
+    double velocidade_joystick = 0.0; // Velocidade enviada pelos botões esq/dir
     std::mutex mtx;              // O cadeado do PID
 };
 
