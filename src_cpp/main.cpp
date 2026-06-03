@@ -63,6 +63,38 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
             c_para = true; // Mantém o freio puxado
         }
 
+        float teto_atual = 0.0;
+        double vel_real = 0.0;
+        double esforco_motor = 0.0;
+        {
+            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+            teto_atual = sensor.ultima_leitura_lidar;
+            vel_real = sensor.velocidade_real_medida;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            esforco_motor = nav.o_aceleracao;
+        }
+
+        // Fim da inspeçao
+        if (teto_atual > 15.0 && iniciado && !nav.inspecao_concluida) {
+            std::cout << "\n[MISSÃO] Fim do túnel detectado.\n";
+            nav.inspecao_concluida = true;
+        }
+        
+        // Bateu em algo (Motor em esforço máximo > 5 m/s², mas não sai do lugar < 0.1 m/s)
+        if (std::abs(esforco_motor) > 5.0 && std::abs(vel_real) < 0.1 && std::abs(velocidade_joystick) > 0.5) {
+            std::cout << "\n[ALERTA] Travamento detectado! Robô colidiu com obstáculo cego.\n";
+            nav.inspecao_concluida = true;
+        }
+
+        // Finalização dos motores 
+        if (!iniciado || nav.inspecao_concluida) {
+            velocidade_joystick = 0.0;
+            c_para = true; 
+        }
+
         // Passa para o NavigationManager processar
         nav_manager.updateMode(c_automatico, c_man);
         nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);

@@ -25,6 +25,9 @@ struct NavBuffer {
     bool c_man = true;             // Comando de modo Manual (nasce como padrão)
     bool c_para = false;           // Comando de parada de emergência
     double velocidade_joystick = 0.0; // Velocidade enviada pelos botões esq/dir
+
+    bool inspecao_concluida = false;
+
     std::mutex mtx;              // O cadeado do PID
 };
 
@@ -56,7 +59,7 @@ struct SensorBuffer {
     std::condition_variable cv_camera; // O alarme da câmera
 
     float ultima_leitura_lidar = 10.0f;
-    double velocidade_real_medida = 0.0; // RESTABELECIDO: Variável compartilhada com o PID e MQTT
+    double velocidade_real_medida = 0.0; // Variável compartilhada com o PID e MQTT
     int ultimo_encoder_recebido = 0;
 
     // ----- Flags de Sincronismo MQTT -----
