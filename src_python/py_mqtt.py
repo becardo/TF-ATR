@@ -8,9 +8,11 @@ from robot_physics import RobotPhysicsSimulator
 aceleracao_recebida_cpp = 0.0
 status_inspecao = 0
 cpp_pronto = False  # Flag para o aperto de mão inicial (Handshake)
+sistema_iniciado = False
 
 def ao_receber_mensagem(client, userdata, msg):
-    global aceleracao_recebida_cpp, status_inspecao, cpp_pronto
+    global aceleracao_recebida_cpp, status_inspecao, cpp_pronto, sistema_iniciado
+    
     topico = msg.topic
     payload = msg.payload.decode()
     
@@ -20,6 +22,8 @@ def ao_receber_mensagem(client, userdata, msg):
         status_inspecao = int(payload)
     elif topico == "tunel/sistema/status" and payload == "CPP_READY":
         cpp_pronto = True
+    elif topico == "tunel/cmd/iniciar" and payload == "1":
+        sistema_iniciado = True
 
 if __name__ == "__main__":
     print("[SISTEMA] Inicializando Ponte MQTT com a Física do Robô...")
@@ -33,6 +37,7 @@ if __name__ == "__main__":
     cliente_mqtt.subscribe("tunel/cmd/aceleracao")
     cliente_mqtt.subscribe("tunel/status/inspecao")
     cliente_mqtt.subscribe("tunel/sistema/status")
+    cliente_mqtt.subscribe("tunel/cmd/iniciar")
     cliente_mqtt.loop_start()
     
     # ---- ETAPA DE HANDSHAKE (Aperto de Mão Inicial) ----
@@ -50,7 +55,7 @@ if __name__ == "__main__":
     ultima_pos_enviada = -1.0 
     clock = pygame.time.Clock()
     
-    print("[OK] Iniciando loop de tempo real (Túnel: 1000m)...")
+    print("[OK] Iniciando loop de tempo real (Túnel: 250m)...")
     
     try:
         while True:
@@ -63,7 +68,7 @@ if __name__ == "__main__":
             
             # Controle de vazão de rede (Filtro de QoS) baseado em metros inteiros
             pos_inteira = int(pos_atual)
-            if pos_inteira != ultima_pos_enviada and pos_atual < 1000.0:
+            if pos_inteira != ultima_pos_enviada and pos_atual < 250.0:
                 cliente_mqtt.publish("tunel/sensor/encoder", pos_inteira)
                 cliente_mqtt.publish("tunel/sensor/lidar", float(telemetria["leitura_lidar"]))
                 ultima_pos_enviada = pos_inteira
@@ -72,25 +77,28 @@ if __name__ == "__main__":
             simulador.atualizar_física(aceleracao_recebida_cpp)
             
             # Impressão da telemetria antes do break de fim de curso
-            if int(tempo_simulado / 0.02) % 25 == 0 or pos_atual >= 1000.0:
-                alerta = "ALARME!" if status_inspecao == 1 else " OK"
-                vel_exibida = 0.00 if pos_atual >= 1000.0 else vel_real
-                accel_exibida = 0.00 if pos_atual >= 1000.0 else aceleracao_recebida_cpp
-                pos_exibida = 1000.00 if pos_atual >= 1000.0 else pos_atual
-                
-                print(f"Tempo: {tempo_simulado:.2f}s | "
-                      f"Pos X: {pos_exibida:>6.2f}m | "
-                      f"Vel: {vel_exibida:>5.2f} m/s | "
-                      f"LIDAR: {telemetria['leitura_lidar']:.3f}m | "
-                      f"PID C++ Accel: {accel_exibida:>6.2f} m/s² | Status: {alerta}")
+            if int(tempo_simulado / 0.02) % 25 == 0 or pos_atual >= 250.0: # (Lembrando de usar 250.0!)
+                if not sistema_iniciado:
+                    print(f"Tempo: {tempo_simulado:.2f}s | [STANDBY] Aguardando comando INICIAR pela GUI...")
+                else:
+                    alerta = "ALARME!" if status_inspecao == 1 else "OK"
+                    vel_exibida = 0.00 if pos_atual >= 250.0 else vel_real
+                    accel_exibida = 0.00 if pos_atual >= 250.0 else aceleracao_recebida_cpp
+                    pos_exibida = 250.00 if pos_atual >= 250.0 else pos_atual
+
+                    print(f"Tempo: {tempo_simulado:.2f}s | "
+                          f"Pos X: {pos_exibida:>6.2f}m | "
+                          f"Vel: {vel_exibida:>5.2f} m/s | "
+                          f"LIDAR: {telemetria['leitura_lidar']:.3f}m | "
+                          f"PID C++ Accel: {accel_exibida:>6.2f} m/s² | Status: {alerta}")
             
             # ---- TRAVA DE SEGURANÇA: FIM DE CURSO CRÍTICO ----
-            if pos_atual >= 1000.0:
+            if pos_atual >= 250.0:
                 print(f"\n[FIM DE CURSO] Linha de chegada atingida ({pos_atual:.2f}m).")
                 print("[SISTEMA] Cravando velocidade e aceleração em zero absoluto.")
                 
                 # Força os estados residuais finais na rede para o Coletor e GUI
-                cliente_mqtt.publish("tunel/sensor/encoder", 1000)
+                cliente_mqtt.publish("tunel/sensor/encoder", 250)
                 cliente_mqtt.publish("tunel/sensor/velocidade", 0.0)
                 cliente_mqtt.publish("tunel/sensor/lidar", 10.0)
                 

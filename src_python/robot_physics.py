@@ -13,7 +13,7 @@ class RobotPhysicsSimulator:
         self.aceleracao_x = 0.0   
         
         # Parâmetros do cenário estendido do túnel
-        self.comprimento_tunel = 100  
+        self.comprimento_tunel = 250  
         self.altura_nominal_teto = 10.0 
         self.ruido_desvio_padrao = 0.03 
         
@@ -24,7 +24,7 @@ class RobotPhysicsSimulator:
         num_pontos = int(self.comprimento_tunel / self.resolucao_mapa)
         perfil = [self.altura_nominal_teto] * num_pontos
         
-        # --- BLOCO 1 DE ANOMALIAS (0m - 50m) ---
+        # Bloco 1 de anomalias 0m - 50m
         idx_ini_sal, idx_fim_sal = int(10 / self.resolucao_mapa), int(12 / self.resolucao_mapa)
         for i in range(idx_ini_sal, idx_fim_sal):
             perfil[i] = 9.0
@@ -38,15 +38,15 @@ class RobotPhysicsSimulator:
             progresso = (i - idx_ini_sua) / (idx_fim_sua - idx_ini_sua)
             perfil[i] = 10.0 - 1.5 * math.sin(progresso * math.pi)
             
-       
-        # idx_ini_b2, idx_fim_b2 = int(150 / self.resolucao_mapa), int(155 / self.resolucao_mapa)
-        # for i in range(idx_ini_b2, idx_fim_b2):
-        #    perfil[i] = 11.5
+        # Bloco 2 de anomalias 150m - 250m
+        idx_ini_b2, idx_fim_b2 = int(150 / self.resolucao_mapa), int(155 / self.resolucao_mapa)
+        for i in range(idx_ini_b2, idx_fim_b2):
+            perfil[i] = 11.5
 
-        # Adiciona uma zona densa de ondulações rítmicas de concreto entre 300m e 320m
-        # idx_ini_ond, idx_fim_ond = int(300 / self.resolucao_mapa), int(320 / self.resolucao_mapa)
-        # for i in range(idx_ini_ond, idx_fim_ond):
-        #     perfil[i] = 10.0 - 1.2 * math.sin(i * 0.5)
+        # Adiciona uma zona densa de ondulações rítmicas de concreto entre 200m e 220m
+        idx_ini_ond, idx_fim_ond = int(200 / self.resolucao_mapa), int(220 / self.resolucao_mapa)
+        for i in range(idx_ini_ond, idx_fim_ond):
+            perfil[i] = 10.0 - 1.2 * math.sin(i * 0.5)
 
         return perfil
 
@@ -58,8 +58,8 @@ class RobotPhysicsSimulator:
         
         # Equações diferenciais de movimento (V = V0 + a*dt)
         self.velocidade_x += aceleracao_real * self.dt
-        if self.velocidade_x < 0.0: 
-            self.velocidade_x = 0.0 
+        #if self.velocidade_x < 0.0: 
+         #   self.velocidade_x = 0.0 
             
         # Equações diferenciais de movimento (X = X0 + V*dt)
         self.posicao_x += self.velocidade_x * self.dt
@@ -79,16 +79,16 @@ class RobotPhysicsSimulator:
         
         return round(altura_base + ruido, 3)
 
-    def obter_estado_telemetria(self):
+    def obter_estado_telemetria(self, sensor_ligado=True):
         return {
             "posicao_x": round(self.posicao_x, 4),
             "velocidade_real": round(self.velocidade_x, 4),
             "aceleracao_atual": round(self.aceleracao_x, 4),
-            "leitura_lidar": self.ler_sensor_lidar()
+            "leitura_lidar": self.ler_sensor_lidar() if sensor_ligado else 10.0
         }
 
 if __name__ == "__main__":
-    print("[TESTE FISICA] Iniciando simulação temporal estável (Túnel: 1000m)...")
+    print("[TESTE FISICA] Iniciando simulação temporal estável (Túnel: 250m)...")
     pygame.init()
     
     simulador = RobotPhysicsSimulator(dt=0.02)

@@ -84,16 +84,19 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
         std::lock_guard<std::mutex> lock(nav.mtx);
         if (payload == "DIREITA") {
             nav.c_para = false;
-            if (nav.velocidade_joystick < 0) nav.velocidade_joystick *= -1; // Garante ir pra frente
+            nav.velocidade_joystick = nav.j_sp_velocidade; // Garante ir pra frente
         } 
         else if (payload == "ESQUERDA") {
             nav.c_para = false;
-            if (nav.velocidade_joystick > 0) nav.velocidade_joystick *= -1; // Dá ré
+            nav.velocidade_joystick = -nav.j_sp_velocidade; // Dá ré
         } 
         else if (payload == "PARAR") {
             nav.c_para = true;
             nav.velocidade_joystick = 0.0;
         }
+        else if (payload == "CONTINUAR") {
+        nav.c_para = false; // Solta o freio de emergência
+    }
     }
     else if (topico == "tunel/cmd/iniciar") { // Botão iniciar
         std::lock_guard<std::mutex> lock_nav(nav.mtx);

@@ -65,7 +65,7 @@ class GUIOperacaoRemota(QMainWindow):
         layout_estados.addRow("Modo de Operação:", self.lbl_modo)
         layout_estados.addRow("Status Inspeção:", self.lbl_inspecao)
         layout_estados.addRow("Posição (Encoder):", self.lbl_encoder)
-        layout_estados.addRow("Velocidade SetPoint:", self.lbl_velocidade)
+        layout_estados.addRow("Velocidade SetPoint:", self.lbl_telemetria_sp)
         layout_estados.addRow("Velocidade Atual:", self.lbl_velocidade)
         layout_estados.addRow("Distância Teto (LIDAR):", self.lbl_lidar)
         layout_estados.addRow("Aceleração:", self.lbl_aceleracao)

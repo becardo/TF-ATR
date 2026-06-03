@@ -66,10 +66,12 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         float teto_atual = 0.0;
         double vel_real = 0.0;
         double esforco_motor = 0.0;
+        int posicao_atual = 0;
         {
             std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
             teto_atual = sensor.ultima_leitura_lidar;
             vel_real = sensor.velocidade_real_medida;
+            posicao_atual = sensor.ultimo_encoder_recebido;
         }
 
         {
@@ -77,17 +79,17 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
             esforco_motor = nav.o_aceleracao;
         }
 
-        // Fim da inspeçao
+        // Fim da inspeção normal (Túnel 1 - final aberto)
         if (teto_atual > 15.0 && iniciado && !nav.inspecao_concluida) {
-            std::cout << "\n[MISSÃO] Fim do túnel detectado.\n";
+            std::cout << "\n [MISSÃO] Fim do túnel detectado.\n";
             nav.inspecao_concluida = true;
         }
-        
-        // Bateu em algo (Motor em esforço máximo > 5 m/s², mas não sai do lugar < 0.1 m/s)
-        if (std::abs(esforco_motor) > 5.0 && std::abs(vel_real) < 0.1 && std::abs(velocidade_joystick) > 0.5) {
-            std::cout << "\n[ALERTA] Travamento detectado! Robô colidiu com obstáculo cego.\n";
+
+        // Bateu em algo (Motor em esforço máximo...)
+        /* if (posicao_atual > 1 && std::abs(esforco_motor) > 5.0 && std::abs(vel_real) < 0.1) {
+            std::cout << "\n [ALERTA] Barreira detectada! Fim da inspeção por obstáculo.\n";
             nav.inspecao_concluida = true;
-        }
+        } */
 
         // Finalização dos motores 
         if (!iniciado || nav.inspecao_concluida) {
@@ -148,14 +150,14 @@ void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         double saida_aceleracao = pid.compute(static_cast<double>(setpoint_atual), velocidade_atual_robo);
 
         // CORREÇÃO: Trava de segurança para fim de curso do túnel estendido de 1000 metros
-        if (posicao_atual_encoder >= 100) {
+        if (posicao_atual_encoder >= 250) {
             saida_aceleracao = 0.0;
             pid.reset();
         }
 
         {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
-            std::cout << "[PID] Setpoint: " << setpoint_atual << " m/s | Aceleracao calculada: " << saida_aceleracao << " m/s²\n";
+            // std::cout << "[PID] Setpoint: " << setpoint_atual << " m/s | Aceleracao calculada: " << saida_aceleracao << " m/s²\n";
         }
         
         {
