@@ -6,7 +6,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout,
                              QSplitter, QSpinBox, QGroupBox, QFormLayout)
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
 
-# Classe auxiliar para emitir sinais do MQTT de forma segura para a Thread da GUI do PyQt
+# Importando a visualização 2D protegida contra falhas X11
+from view_2d import PygameWidget
+
 class SinaisMQTT(QObject):
     dados_recebidos = pyqtSignal(str, str)
 
@@ -16,27 +18,22 @@ class GUIOperacaoRemota(QMainWindow):
         self.setWindowTitle("ATR 2026/1 - GUI Operação Remota (Centro de Controle)")
         self.setGeometry(100, 100, 1100, 750)
 
-        # Mecanismo de comunicação interna de Threads
         self.sinais = SinaisMQTT()
         self.sinais.dados_recebidos.connect(self.processar_atualizacao_gui)
 
-        # Variáveis de Estado Internas (Últimos valores recebidos)
         self.ultimo_encoder = 0
         self.ultima_velocidade = 0.0
         self.ultimo_lidar = 10.0
         self.ultima_aceleracao = 0.0
         self.status_inspecao = 0
 
-        # "0" = Manual | "1" = Automático
         self.modo_operacao = "0" 
         self.missao_iniciada = False
 
-        # Temporizador de atualização da janela 
         self.timer_tela = QTimer()
         self.timer_tela.timeout.connect(self.atualizar_tela)
-        self.timer_tela.start(100) # Atualiza a tela a cada 100ms
+        self.timer_tela.start(100) 
 
-        # Inicializa Layout e Conexões MQTT
         self.init_ui()
         self.init_mqtt()
 
@@ -45,7 +42,7 @@ class GUIOperacaoRemota(QMainWindow):
         self.setCentralWidget(widget_central)
         layout_principal = QHBoxLayout(widget_central)
 
-        # Painel de controle
+        # Painel de controle esquerdo
         painel_controle = QWidget()
         painel_controle.setFixedWidth(380)
         layout_painel = QVBoxLayout(painel_controle)
@@ -75,11 +72,9 @@ class GUIOperacaoRemota(QMainWindow):
         
         layout_painel.addWidget(grupo_estados)
 
-        # Comandos Remotos (Envio via MQTT)
         grupo_comandos = QGroupBox("Comandos Remotos")
         layout_comandos = QVBoxLayout(grupo_comandos)
 
-        # Seleção de Modo (Auto / Manual)
         layout_modos = QHBoxLayout()
         self.btn_modo_auto = QPushButton("Automático")
         self.btn_modo_man = QPushButton("Manual")
@@ -89,7 +84,6 @@ class GUIOperacaoRemota(QMainWindow):
         layout_modos.addWidget(self.btn_modo_man)
         layout_comandos.addLayout(layout_modos)
 
-        # Setpoint de Velocidade (Alvo para o PID no C++)
         layout_vel = QHBoxLayout()
         layout_vel.addWidget(QLabel("Sp Velocidade (m/s):"))
         self.sp_velocidade = QSpinBox()
@@ -99,7 +93,6 @@ class GUIOperacaoRemota(QMainWindow):
         layout_vel.addWidget(self.sp_velocidade)
         layout_comandos.addLayout(layout_vel)
 
-        # Botões de Direção e Movimentação
         layout_dir = QHBoxLayout()
         self.btn_esquerda = QPushButton("◀ Esquerda")
         self.btn_direita = QPushButton("Direita ▶")
@@ -109,10 +102,9 @@ class GUIOperacaoRemota(QMainWindow):
         layout_dir.addWidget(self.btn_direita)
         layout_comandos.addLayout(layout_dir)
 
-        # Botão Iniciar, Continuar e Parar
         self.btn_iniciar = QPushButton("Iniciar")
         self.btn_iniciar.setStyleSheet("background-color: green; color: white; font-weight: bold; height: 35px;")
-        self.btn_iniciar.setEnabled(False) # botão Iniciar começa desabilitado
+        self.btn_iniciar.setEnabled(False) 
         self.btn_iniciar.clicked.connect(self.publish_iniciar)
 
         self.btn_continuar = QPushButton("Continuar")
@@ -126,7 +118,6 @@ class GUIOperacaoRemota(QMainWindow):
         layout_comandos.addWidget(self.btn_continuar)
         layout_comandos.addWidget(self.btn_para)
 
-        # Impede os botões de roubarem as setas do teclado 
         self.btn_esquerda.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_direita.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_para.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -138,21 +129,21 @@ class GUIOperacaoRemota(QMainWindow):
         layout_painel.addWidget(grupo_comandos)
         layout_principal.addWidget(painel_controle)
 
-        # Visuzalização Gráfica
+        # Divisor Lado Direito
         divisor_visualizacao = QSplitter(Qt.Orientation.Vertical)
 
-        # Simulação 2D
+        # Container da Simulação 2D
         self.container_simulacao = QFrame()
         self.container_simulacao.setFrameShape(QFrame.Shape.StyledPanel)
-        self.container_simulacao.setStyleSheet("background-color: #2b2b2b; border: 2px solid #555; border-radius: 6px;")
+        self.container_simulacao.setStyleSheet("background-color: #1e1e1e; border: 2px solid #555; border-radius: 6px;")
         
         layout_sim = QVBoxLayout(self.container_simulacao)
-        self.lbl_sim_placeholder = QLabel("VISTA LATERAL DO TÚNEL 2D\n[Aqui o Pygame ou QPainter renderizará o movimento do robô]", self.container_simulacao)
-        self.lbl_sim_placeholder.setStyleSheet("color: #aaa; font-weight: bold;")
-        self.lbl_sim_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout_sim.addWidget(self.lbl_sim_placeholder)
+        layout_sim.setContentsMargins(2, 2, 2, 2)
+        
+        self.pygame_simulador = PygameWidget()
+        layout_sim.addWidget(self.pygame_simulador)
 
-        # Gráfico LIDAR
+        # Gráfico estático inferior
         self.container_graficos = QFrame()
         self.container_graficos.setFrameShape(QFrame.Shape.StyledPanel)
         self.container_graficos.setStyleSheet("background-color: #151515; border: 2px solid #333; border-radius: 6px;")
@@ -165,39 +156,29 @@ class GUIOperacaoRemota(QMainWindow):
 
         divisor_visualizacao.addWidget(self.container_simulacao)
         divisor_visualizacao.addWidget(self.container_graficos)
-        divisor_visualizacao.setSizes([400, 300])
+        divisor_visualizacao.setSizes([420, 280])
 
         layout_principal.addWidget(divisor_visualizacao)
 
-    # Comunicação de Rede - MQTT Cliente
     def init_mqtt(self):
         self.cliente_mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.cliente_mqtt.on_message = self.ao_receber_mensagem
         
         try:
             self.cliente_mqtt.connect("localhost", 1883, 60)
-            
-            # Inscrição para ouvir o C++
             self.cliente_mqtt.subscribe("tunel/sensor/encoder")
             self.cliente_mqtt.subscribe("tunel/sensor/lidar")
             self.cliente_mqtt.subscribe("tunel/sensor/velocidade")
             self.cliente_mqtt.subscribe("tunel/cmd/aceleracao")
             self.cliente_mqtt.subscribe("tunel/status/inspecao")
-            
             self.cliente_mqtt.loop_start()
-
             print("[GUI MQTT] Conectado com sucesso ao Broker Mosquitto.")
-
         except Exception as e:
             print(f"[ERRO GUI MQTT] Não foi possível conectar ao Broker: {e}")
 
-    # Callback: recebe e manda pro correio interno
     def ao_receber_mensagem(self, client, userdata, msg):
-        topico = msg.topic
-        payload = msg.payload.decode()
-        self.sinais.dados_recebidos.emit(topico, payload)
+        self.sinais.dados_recebidos.emit(msg.topic, msg.payload.decode())
 
-    # Atualiza as variáveis de memória conforme o correio entrega os sinais
     def processar_atualizacao_gui(self, topico, payload):
         if topico == "tunel/sensor/encoder":
             self.ultimo_encoder = int(payload)
@@ -216,6 +197,13 @@ class GUIOperacaoRemota(QMainWindow):
         self.lbl_velocidade.setText(f"{self.ultima_velocidade:.2f} m/s")
         self.lbl_aceleracao.setText(f"{self.ultima_aceleracao:.2f} m/s²")
         
+        self.pygame_simulador.atualizar_dados(
+            self.ultimo_encoder, 
+            self.ultima_velocidade, 
+            self.ultimo_lidar, 
+            self.status_inspecao
+        )
+        
         if not self.missao_iniciada:
             self.lbl_inspecao.setText("Aguardando...")
             self.lbl_inspecao.setStyleSheet("color: gray; font-weight: bold; font-size: 14px;")
@@ -226,23 +214,18 @@ class GUIOperacaoRemota(QMainWindow):
             self.lbl_inspecao.setText("TETO INTEGRAL")
             self.lbl_inspecao.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
 
-    # Quando o usuário escolhe outro SETPOINT de velocidade em modo Manual
     def atualizar_sp_tela(self, valor):
-        # Atualiza a tela de telemetria se estiver no modo manual
         if self.modo_operacao == "0": 
             self.lbl_telemetria_sp.setText(f"{valor} m/s")
-        # Envia para o C++
         self.publish_mqtt_data("tunel/controle/sp_velocidade", str(valor))
 
-    # Comunicação GUI - Rede
-    def publish_iniciar( self):
+    def publish_iniciar(self):
         self.missao_iniciada = True
         self.btn_iniciar.setText("INICIAR")
         self.publish_mqtt_data("tunel/cmd/modo", self.modo_operacao)
         self.publish_mqtt_data("tunel/cmd/iniciar", "1")
         self.btn_iniciar.setEnabled(False)
 
-    # Envio de Comandos - Publicações
     def publish_mqtt_data(self, topic, payload):
         self.cliente_mqtt.publish(topic, payload)
 
@@ -252,83 +235,63 @@ class GUIOperacaoRemota(QMainWindow):
             self.lbl_modo.setText("AUTOMÁTICO")
             self.lbl_modo.setStyleSheet("color: darkorange; font-weight: bold; font-size: 14px;")
             self.lbl_telemetria_sp.setText("1 m/s")
-
-            # Desabilita o SetPoint de velocidade, e botões de esquerda e direita
             self.sp_velocidade.setEnabled(False)
             self.btn_esquerda.setEnabled(False)
             self.btn_direita.setEnabled(False)
-
             self.publish_mqtt_data("tunel/controle/modo", "AUTO")
         else:
             self.modo_operacao = "0"
             self.lbl_modo.setText("MANUAL")
             self.lbl_modo.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
             self.lbl_telemetria_sp.setText(f"{self.sp_velocidade.value()} m/s")
-
-            # Habilita os botões e o setpoint
             self.sp_velocidade.setEnabled(True)
             self.btn_esquerda.setEnabled(True)
             self.btn_direita.setEnabled(True)
-
             self.publish_mqtt_data("tunel/controle/modo", "MANUAL")
             
-        self.btn_iniciar.setEnabled(True) # habilita o botão Iniciar
+        self.btn_iniciar.setEnabled(True) 
         self.publish_mqtt_data("tunel/controle/sp_velocidade", str(self.sp_velocidade.value()))
 
     def publish_direcao(self, comando):
         print(f"[GUI COMANDO] Enviando ação de movimentação: {comando}")
         self.publish_mqtt_data("tunel/controle/direcao", comando)
-        
-        # Se for uma emergência (PARAR), zera a caixa de seleção de velocidade
         if comando == "PARAR":
             self.sp_velocidade.setValue(0)
             self.publish_mqtt_data("tunel/controle/sp_velocidade", "0.0")
 
-    # Encerra as portas de rede ao fechar a janela
     def closeEvent(self, event):
         self.cliente_mqtt.loop_stop()
         self.cliente_mqtt.disconnect()
+        self.pygame_simulador.close()
         event.accept()
 
-    # Operação via Teclado
     def keyPressEvent(self, event):
         if event.isAutoRepeat(): return
-
-        # Só permite pilotar se o sistema já tiver sido iniciado
-        if self.btn_iniciar.isEnabled(): 
-            return # Se o botão ainda está ativado, o robô está em Standby
-        
-        # Ignora as setas do teclado se estiver no modo automático
+        if self.btn_iniciar.isEnabled(): return 
         if self.modo_operacao == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
             return
 
         if event.key() == Qt.Key.Key_Right:
             self.publish_direcao("DIREITA")
-            self.btn_direita.setDown(True) # Efeito visual de botão afundado na tela
-            
+            self.btn_direita.setDown(True)
         elif event.key() == Qt.Key.Key_Left:
             self.publish_direcao("ESQUERDA")
             self.btn_esquerda.setDown(True)
-            
-        elif event.key() == Qt.Key.Key_Space: # spacebar = parar
+        elif event.key() == Qt.Key.Key_Space: 
             self.publish_direcao("PARAR")
             self.btn_para.setDown(True)
 
     def keyReleaseEvent(self, event):
         if event.isAutoRepeat(): return
-
-        # Levanta os botões na tela quando o usuário solta a tecla
         if self.modo_operacao == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
             return
         
         if event.key() == Qt.Key.Key_Right:
             self.btn_direita.setDown(False)
-            self.publish_direcao("PARAR") # Para o robo quando a tecla deixa de ser pressionada 
-
+            self.publish_direcao("PARAR") 
         elif event.key() == Qt.Key.Key_Left:
             self.btn_esquerda.setDown(False)
             self.publish_direcao("PARAR")
-
         elif event.key() == Qt.Key.Key_Space:
             self.btn_para.setDown(False)
 
