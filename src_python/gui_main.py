@@ -3,7 +3,7 @@ import sys
 import paho.mqtt.client as mqtt
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, 
                              QVBoxLayout, QPushButton, QFrame, QLabel, 
-                             QSplitter, QSpinBox, QGroupBox, QFormLayout)
+                             QSplitter, QGroupBox, QFormLayout)
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
 
 # Importando a visualização 2D protegida contra falhas X11
@@ -58,14 +58,12 @@ class GUIOperacaoRemota(QMainWindow):
         
         self.lbl_encoder = QLabel("0 m")
         self.lbl_velocidade = QLabel("0.00 m/s")
-        self.lbl_telemetria_sp = QLabel("1 m/s")
         self.lbl_lidar = QLabel("10.00 m")
         self.lbl_aceleracao = QLabel("0.00 m/s²")
         
         layout_estados.addRow("Modo de Operação:", self.lbl_modo)
         layout_estados.addRow("Status Inspeção:", self.lbl_inspecao)
         layout_estados.addRow("Posição (Encoder):", self.lbl_encoder)
-        layout_estados.addRow("Velocidade SetPoint:", self.lbl_telemetria_sp)
         layout_estados.addRow("Velocidade Atual:", self.lbl_velocidade)
         layout_estados.addRow("Distância Teto (LIDAR):", self.lbl_lidar)
         layout_estados.addRow("Aceleração:", self.lbl_aceleracao)
@@ -84,15 +82,7 @@ class GUIOperacaoRemota(QMainWindow):
         layout_modos.addWidget(self.btn_modo_man)
         layout_comandos.addLayout(layout_modos)
 
-        layout_vel = QHBoxLayout()
-        layout_vel.addWidget(QLabel("Sp Velocidade (m/s):"))
-        self.sp_velocidade = QSpinBox()
-        self.sp_velocidade.setRange(0, 20)
-        self.sp_velocidade.setValue(1) 
-        self.sp_velocidade.valueChanged.connect(self.atualizar_sp_tela)
-        layout_vel.addWidget(self.sp_velocidade)
-        layout_comandos.addLayout(layout_vel)
-
+        # Botões de Direção e Movimentação Manual
         layout_dir = QHBoxLayout()
         self.btn_esquerda = QPushButton("◀ Esquerda")
         self.btn_direita = QPushButton("Direita ▶")
@@ -214,11 +204,6 @@ class GUIOperacaoRemota(QMainWindow):
             self.lbl_inspecao.setText("TETO INTEGRAL")
             self.lbl_inspecao.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
 
-    def atualizar_sp_tela(self, valor):
-        if self.modo_operacao == "0": 
-            self.lbl_telemetria_sp.setText(f"{valor} m/s")
-        self.publish_mqtt_data("tunel/controle/sp_velocidade", str(valor))
-
     def publish_iniciar(self):
         self.missao_iniciada = True
         self.btn_iniciar.setText("INICIAR")
@@ -234,8 +219,6 @@ class GUIOperacaoRemota(QMainWindow):
             self.modo_operacao = "1"
             self.lbl_modo.setText("AUTOMÁTICO")
             self.lbl_modo.setStyleSheet("color: darkorange; font-weight: bold; font-size: 14px;")
-            self.lbl_telemetria_sp.setText("1 m/s")
-            self.sp_velocidade.setEnabled(False)
             self.btn_esquerda.setEnabled(False)
             self.btn_direita.setEnabled(False)
             self.publish_mqtt_data("tunel/controle/modo", "AUTO")
@@ -243,21 +226,15 @@ class GUIOperacaoRemota(QMainWindow):
             self.modo_operacao = "0"
             self.lbl_modo.setText("MANUAL")
             self.lbl_modo.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
-            self.lbl_telemetria_sp.setText(f"{self.sp_velocidade.value()} m/s")
-            self.sp_velocidade.setEnabled(True)
             self.btn_esquerda.setEnabled(True)
             self.btn_direita.setEnabled(True)
             self.publish_mqtt_data("tunel/controle/modo", "MANUAL")
             
         self.btn_iniciar.setEnabled(True) 
-        self.publish_mqtt_data("tunel/controle/sp_velocidade", str(self.sp_velocidade.value()))
 
     def publish_direcao(self, comando):
         print(f"[GUI COMANDO] Enviando ação de movimentação: {comando}")
         self.publish_mqtt_data("tunel/controle/direcao", comando)
-        if comando == "PARAR":
-            self.sp_velocidade.setValue(0)
-            self.publish_mqtt_data("tunel/controle/sp_velocidade", "0.0")
 
     def closeEvent(self, event):
         self.cliente_mqtt.loop_stop()
