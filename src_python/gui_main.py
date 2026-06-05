@@ -60,7 +60,7 @@ class GUIOperacaoRemota(QMainWindow):
         
         self.lbl_encoder = QLabel("0 m")
         self.lbl_velocidade = QLabel("0.00 m/s")
-        self.lbl_telemetria_sp = QLabel("5 m/s")
+        self.lbl_telemetria_sp = QLabel("1 m/s")
         self.lbl_lidar = QLabel("10.00 m")
         self.lbl_aceleracao = QLabel("0.00 m/s²")
         
@@ -93,7 +93,7 @@ class GUIOperacaoRemota(QMainWindow):
         layout_vel.addWidget(QLabel("Sp Velocidade (m/s):"))
         self.sp_velocidade = QSpinBox()
         self.sp_velocidade.setRange(0, 20)
-        self.sp_velocidade.setValue(5) 
+        self.sp_velocidade.setValue(1) 
         self.sp_velocidade.valueChanged.connect(self.atualizar_sp_tela)
         layout_vel.addWidget(self.sp_velocidade)
         layout_comandos.addLayout(layout_vel)
@@ -246,7 +246,7 @@ class GUIOperacaoRemota(QMainWindow):
             self.modo_operacao = "1"
             self.lbl_modo.setText("AUTOMÁTICO")
             self.lbl_modo.setStyleSheet("color: darkorange; font-weight: bold; font-size: 14px;")
-            self.lbl_telemetria_sp.setText("5 m/s")
+            self.lbl_telemetria_sp.setText("1 m/s")
 
             # Desabilita o SetPoint de velocidade, e botões de esquerda e direita
             self.sp_velocidade.setEnabled(False)
