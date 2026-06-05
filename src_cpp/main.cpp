@@ -105,13 +105,22 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         nav_manager.updateMode(c_automatico, c_man);
         nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);
 
-        // ----- Zona Crítica: Escrita no Buffer Compartilhado -----
+        // Zona crítica: Escrita no Buffer compartilhado
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
-            if (!nav.e_automatico && !nav.c_para && !em_inspecao) {
-                nav.j_sp_velocidade = nav.velocidade_joystick;
+            if (nav.e_automatico) {
+                // Acelera para 1.0 m/s
+                if (nav.c_para || em_inspecao) {
+                    nav.j_sp_velocidade = 0.0;
+                } else {
+                    nav.j_sp_velocidade = 1.0; 
+                }
             } else {
-                nav.j_sp_velocidade = nav_manager.getTargetSpeed();
+                if (nav.c_para || em_inspecao) {
+                    nav.j_sp_velocidade = 0.0;
+                } else {
+                    nav.j_sp_velocidade = nav.velocidade_joystick;
+                }
             }
         }
 

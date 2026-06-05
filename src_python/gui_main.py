@@ -280,9 +280,9 @@ class GUIOperacaoRemota(QMainWindow):
         self.publish_mqtt_data("tunel/controle/direcao", comando)
         
         # Se for uma emergência (PARAR), zera a caixa de seleção de velocidade
-        # if comando == "PARAR":
-            #self.sp_velocidade.setValue(0)
-            #self.publish_mqtt_data("tunel/controle/sp_velocidade", "0.0")
+        if comando == "PARAR":
+            self.sp_velocidade.setValue(0)
+            self.publish_mqtt_data("tunel/controle/sp_velocidade", "0.0")
 
     # Encerra as portas de rede ao fechar a janela
     def closeEvent(self, event):

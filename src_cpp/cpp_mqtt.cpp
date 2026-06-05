@@ -143,6 +143,7 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
         std::lock_guard<std::mutex> lock_nav(nav.mtx);
         if (payload == "1") {
             nav.sistema_iniciado = true;
+            nav.c_para = false;
             std::cout << "[MQTT-IN] Comando INICIAR recebido!\n";
         }
     }
@@ -154,6 +155,17 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
         // Utilizada para realimentação do controlador e exibição na interface
         std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
         sensor.velocidade_real_medida = vel;
+    }
+    // Captura a ordem de mudança de modo vinda do botão "INICIAR"
+    else if (topico == "tunel/controle/modo" || topico == "tunel/cmd/modo") {
+        std::lock_guard<std::mutex> lock(nav.mtx);
+        if (payload == "AUTO" || payload == "1") {
+            nav.e_automatico = true;
+            std::cout << "[MQTT-IN] Ordem recebida: Modo AUTOMATICO ativado.\n";
+        } else {
+            nav.e_automatico = false;
+            std::cout << "[MQTT-IN] Ordem recebida: Modo MANUAL ativado.\n";
+        }
     }
 
     // Liberação de recursos alocados
@@ -211,6 +223,8 @@ void t_comunicacao_mqtt(){
     MQTTClient_subscribe(client, "tunel/controle/direcao", 1);
     MQTTClient_subscribe(client, "tunel/cmd/iniciar", 1);
     MQTTClient_subscribe(client, "tunel/sensor/velocidade", 1);
+    MQTTClient_subscribe(client, "tunel/cmd/modo", 1);
+    MQTTClient_subscribe(client, "tunel/controle/modo", 1);
 
     // Handshake
     // Aguarda até que o simulador Python envie o sinal
@@ -322,7 +336,9 @@ void t_comunicacao_mqtt(){
     MQTTClient_unsubscribe(client, "tunel/controle/sp_velocidade");
     MQTTClient_unsubscribe(client, "tunel/controle/direcao");
     MQTTClient_unsubscribe(client, "tunel/sistema/status");
-    MQTTClient_subscribe(client, "tunel/cmd/iniciar", 1);
+    MQTTClient_unsubscribe(client, "tunel/cmd/iniciar");
+    MQTTClient_unsubscribe(client, "tunel/cmd/modo");
+    MQTTClient_unsubscribe(client, "tunel/controle/modo");
     
     MQTTClient_disconnect(client, 5000);
     MQTTClient_destroy(&client);
