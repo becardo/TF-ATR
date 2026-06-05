@@ -12,11 +12,11 @@
 #include "Lidar.hpp"
 #include "Odometria.hpp"
 
-// --- Odometria: Calcula velocidade com base no Encoder do MQTT ---
+// Odometria: Calcula velocidade com base no Encoder do MQTT
 void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     Odometria odo; 
     int distancia_anterior = 0;
-    double dt = 0.02; // 20ms rígidos do timer
+    double dt = 0.02; 
 
     boost::asio::io_context io_odo;
     boost::asio::steady_timer timer_odo(io_odo, boost::asio::chrono::milliseconds(20));
@@ -28,20 +28,20 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
 
         int dist_atual = distancia_anterior;
 
-        // ZONA CRÍTICA: Captura segura da última posição do encoder descarregada pelo MQTT
+        // Captura da última posição do encoder descarregada pelo MQTT
         {
             std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
-            dist_atual = sensor.ultimo_encoder_recebido;
+            dist_atual = sensor.ultima_leitura_encoder;
         }
 
         // Cálculo derivativo da velocidade real (Delta X / Delta T) em metros
         double velocidade_medida = (dist_atual - distancia_anterior) / dt;
 
         // Salva a velocidade calculada para a thread do PID ler
-        {
+        /* {
             std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
             sensor.velocidade_real_medida = velocidade_medida;
-        }
+        } */
         
         // Atualiza a memória de rastreamento para o próximo ciclo de 20ms
         distancia_anterior = dist_atual;
@@ -54,9 +54,9 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     io_odo.run();
 }
 
-// --- LIDAR / Reconstrução do teto: Processa média móvel e dispara Alarme ---
+// LIDAR / Reconstrução do teto: Processa média móvel e dispara Alarme 
 void t_reconstrucao_teto(SensorBuffer& sensor) {
-    LidarFilter filtro(5); 
+    LidarFilter filtro(5); // Filtro móvel com janela de 5 amostras
 
     // Inicializa o histórico do filtro circular com a altura ideal
     for(int i = 0; i < 5; i++) { filtro.calcular(10.0f); }
@@ -71,13 +71,14 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
 
         float leitura_lidar_real = 10.0f;
 
-        // CORREÇÃO: Captura o dado bruto da rede ANTES de passar pelo filtro
+        // Captura o dado bruto (com ruído)
         {
             std::lock_guard<std::mutex> lock_memoria(sensor.mtx_leituras);
             leitura_lidar_real = sensor.ultima_leitura_lidar;
         }
 
-        // Processa o dado no Buffer Circular de Média Móvel para eliminar ruído gaussiano
+        // Insere o dado novo no buffer circular
+        // Apaga o dado mais velho e devolve a média matemática das últimas 5 leituras
         float media = filtro.calcular(leitura_lidar_real);
 
         bool falha_detectada = false;

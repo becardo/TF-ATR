@@ -16,13 +16,13 @@
 #include "Coletor.hpp"
 #include "Camera.hpp"
 
-// Protótipo da nova thread de rede desenvolvida pela equipe
+// Thread de comunicação MQTT
 void t_comunicacao_mqtt();
 
 NavBuffer nav;
 SensorBuffer sensor;
 
-// Thread responsável por ler os comandos (joystick/botoes) e definir o Setpoint
+// Thread responsável por ler os comandos do usuário (joystick/botoes) e definir o Setpoint
 void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     NavigationManager nav_manager; 
 
@@ -34,6 +34,7 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     loop_comando = ([&](const boost::system::error_code& erro){
         if(erro) return;
 
+        // Leitura do status da inspeção (câmera)
         bool em_inspecao = false;
         {
             // Bloqueia o mutex da câmera apenas para ler a flag de alarme
@@ -41,43 +42,45 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
             em_inspecao = sensor.e_inspecao;
         }
 
-        // ----- Mock de entradas -----
+        // Mocks de entrada, vindos do MQTT
         bool iniciado = false;
         bool c_automatico = false; 
-        bool c_man = true;         
+        bool c_man = false;         
         bool c_para = false;       
-        double velocidade_joystick = 5.0; 
+        double velocidade_joystick = 0.0; 
 
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
             iniciado = nav.sistema_iniciado;
-            c_automatico = nav.e_automatico;
+            c_automatico = nav.c_automatico;
             c_man = nav.c_man;
             c_para = nav.c_para;
             velocidade_joystick = nav.velocidade_joystick;
         }
 
-        // Intercepçao:
+        // Intercepçao: enquando não for iniciada, robô não se mexe
         if (!iniciado) {
             velocidade_joystick = 0.0;
             c_para = true; // Mantém o freio puxado
         }
 
+        // Leitura da Telemetria 
         float teto_atual = 0.0;
-        double vel_real = 0.0;
-        double esforco_motor = 0.0;
-        int posicao_atual = 0;
+        // double vel_real = 0.0;
+        // double esforco_motor = 0.0;
+        // int posicao_atual = 0;
+
         {
             std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
             teto_atual = sensor.ultima_leitura_lidar;
-            vel_real = sensor.velocidade_real_medida;
-            posicao_atual = sensor.ultimo_encoder_recebido;
+            // vel_real = sensor.velocidade_real_medida;
+            // posicao_atual = sensor.ultima_leitura_encoder;
         }
 
-        {
+        /* {
             std::lock_guard<std::mutex> lock(nav.mtx);
             esforco_motor = nav.o_aceleracao;
-        }
+        } */
 
         // Fim da inspeção normal (Túnel 1 - final aberto)
         if (teto_atual > 15.0 && iniciado && !nav.inspecao_concluida) {
@@ -85,23 +88,20 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
             nav.inspecao_concluida = true;
         }
 
-        // Bateu em algo (Motor em esforço máximo...)
+        // Fim da inspeção normal (Túnel 2 - Bateu em algo)
         /* if (posicao_atual > 1 && std::abs(esforco_motor) > 5.0 && std::abs(vel_real) < 0.1) {
             std::cout << "\n [ALERTA] Barreira detectada! Fim da inspeção por obstáculo.\n";
             nav.inspecao_concluida = true;
         } */
 
-        // Finalização dos motores 
+        // Finalização dos motores, inspeção finalizada
         if (!iniciado || nav.inspecao_concluida) {
             velocidade_joystick = 0.0;
             c_para = true; 
         }
 
         // Passa para o NavigationManager processar
-        nav_manager.updateMode(c_automatico, c_man);
-        nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);
-
-        // Processamento da lógica de estado da navegação
+        // Atualiza o modo (Manual/Automática) e calcula a nova velocidade
         nav_manager.updateMode(c_automatico, c_man);
         nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);
 
@@ -121,8 +121,11 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
 }
 
 // Thread responsável pelo controle PID em malha fechada
+// Lê o setpoint desejado, comparar com a velocidade real e calcula
+// o esforço de aceleração necessário
 void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     PIDController pid(1.0, 0.1, 0.05, 0.08);
+    // Kp=1.0, Ki=1.0, Kd=0.05, dt=0.08
 
     boost::asio::io_context io_PID_nav;
     boost::asio::steady_timer timer_PID_nav(io_PID_nav, boost::asio::chrono::milliseconds(80));
@@ -132,34 +135,38 @@ void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     loop_PID = ([&](const boost::system::error_code& erro){
         if(erro) return;
 
+        // leitura do setpoint definido por t_comando_navegacao
         float setpoint_atual = 0.0;
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
             setpoint_atual = nav.j_sp_velocidade;
         }
 
+        // Leitura da física real
         double velocidade_atual_robo = 0.0;
         int posicao_atual_encoder = 0;
         {
             // Tranca a porta para ler a telemetria atualizada pelo MQTT com segurança
             std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
             velocidade_atual_robo = sensor.velocidade_real_medida;
-            posicao_atual_encoder = sensor.ultimo_encoder_recebido;
+            posicao_atual_encoder = sensor.ultima_leitura_encoder;
         }
 
+        // Cálculo do PID
         double saida_aceleracao = pid.compute(static_cast<double>(setpoint_atual), velocidade_atual_robo);
 
-        // CORREÇÃO: Trava de segurança para fim de curso do túnel estendido de 1000 metros
+        // Trava de segurança para fim de curso do túnel estendido de 250 metros
         if (posicao_atual_encoder >= 250) {
             saida_aceleracao = 0.0;
-            pid.reset();
+            pid.reset(); // Zera a memória integral do PID
         }
 
         {
             std::lock_guard<std::mutex> lock_tela(mtx_console);
-            // std::cout << "[PID] Setpoint: " << setpoint_atual << " m/s | Aceleracao calculada: " << saida_aceleracao << " m/s²\n";
+            std::cout << "[PID] Setpoint: " << setpoint_atual << " m/s | Aceleracao calculada: " << saida_aceleracao << " m/s²\n";
         }
         
+        // Escrita da aceleração no Buffer para a Thread MQTT enviar ao Python
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
             nav.o_aceleracao = saida_aceleracao;

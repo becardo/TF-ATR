@@ -27,8 +27,10 @@ class GUIOperacaoRemota(QMainWindow):
         self.ultima_aceleracao = 0.0
         self.status_inspecao = 0
 
-        self.modo_pendente = "0"
+        # "0" = Manual | "1" = Automático
+        self.modo_operacao = "0" 
 
+        # Temporizador de atualização da janela 
         self.timer_tela = QTimer()
         self.timer_tela.timeout.connect(self.atualizar_tela)
         self.timer_tela.start(100) # Atualiza a tela a cada 100ms
@@ -72,7 +74,7 @@ class GUIOperacaoRemota(QMainWindow):
         
         layout_painel.addWidget(grupo_estados)
 
-        # --- GRUPO: COMANDOS REMOTOS (Envio via MQTT) ---
+        # Comandos Remotos (Envio via MQTT)
         grupo_comandos = QGroupBox("Comandos Remotos")
         layout_comandos = QVBoxLayout(grupo_comandos)
 
@@ -174,6 +176,7 @@ class GUIOperacaoRemota(QMainWindow):
         try:
             self.cliente_mqtt.connect("localhost", 1883, 60)
             
+            # Inscrição para ouvir o C++
             self.cliente_mqtt.subscribe("tunel/sensor/encoder")
             self.cliente_mqtt.subscribe("tunel/sensor/lidar")
             self.cliente_mqtt.subscribe("tunel/sensor/velocidade")
@@ -181,15 +184,19 @@ class GUIOperacaoRemota(QMainWindow):
             self.cliente_mqtt.subscribe("tunel/status/inspecao")
             
             self.cliente_mqtt.loop_start()
+
             print("[GUI MQTT] Conectado com sucesso ao Broker Mosquitto.")
+
         except Exception as e:
             print(f"[ERRO GUI MQTT] Não foi possível conectar ao Broker: {e}")
 
+    # Callback: recebe e manda pro correio interno
     def ao_receber_mensagem(self, client, userdata, msg):
         topico = msg.topic
         payload = msg.payload.decode()
         self.sinais.dados_recebidos.emit(topico, payload)
 
+    # Atualiza as variáveis de memória conforme o correio entrega os sinais
     def processar_atualizacao_gui(self, topico, payload):
         if topico == "tunel/sensor/encoder":
             self.ultimo_encoder = int(payload)
@@ -215,9 +222,10 @@ class GUIOperacaoRemota(QMainWindow):
             self.lbl_inspecao.setText("TETO INTEGRAL")
             self.lbl_inspecao.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
 
+    # Quando o usuário escolhe outro SETPOINT de velocidade em modo Manual
     def atualizar_sp_tela(self, valor):
         # Atualiza a tela de telemetria se estiver no modo manual
-        if self.modo_pendente == "0": 
+        if self.modo_operacao == "0": 
             self.lbl_telemetria_sp.setText(f"{valor} m/s")
         # Envia para o C++
         self.publish_mqtt_data("tunel/controle/sp_velocidade", str(valor))
@@ -225,17 +233,17 @@ class GUIOperacaoRemota(QMainWindow):
     # Comunicação GUI - Rede
     def publish_iniciar( self):
         self.btn_iniciar.setText("INICIAR")
-        self.publish_mqtt_data("tunel/cmd/modo", self.modo_pendente)
+        self.publish_mqtt_data("tunel/cmd/modo", self.modo_operacao)
         self.publish_mqtt_data("tunel/cmd/iniciar", "1")
         self.btn_iniciar.setEnabled(False)
 
-
+    # Envio de Comandos - Publicações
     def publish_mqtt_data(self, topic, payload):
         self.cliente_mqtt.publish(topic, payload)
 
     def publish_comando(self, tipo, valor):
         if valor == "AUTOMATICO":
-            self.modo_comando = "1"
+            self.modo_operacao = "1"
             self.lbl_modo.setText("AUTOMÁTICO")
             self.lbl_modo.setStyleSheet("color: darkorange; font-weight: bold; font-size: 14px;")
             self.lbl_telemetria_sp.setText("5 m/s")
@@ -247,7 +255,7 @@ class GUIOperacaoRemota(QMainWindow):
 
             self.publish_mqtt_data("tunel/controle/modo", "AUTO")
         else:
-            self.modo_comando = "0"
+            self.modo_operacao = "0"
             self.lbl_modo.setText("MANUAL")
             self.lbl_modo.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
             self.lbl_telemetria_sp.setText(f"{self.sp_velocidade.value()} m/s")
@@ -266,10 +274,12 @@ class GUIOperacaoRemota(QMainWindow):
         print(f"[GUI COMANDO] Enviando ação de movimentação: {comando}")
         self.publish_mqtt_data("tunel/controle/direcao", comando)
         
-        if comando == "PARAR":
-            self.sp_velocidade.setValue(0)
-            self.publish_mqtt_data("tunel/controle/sp_velocidade", "0.0")
+        # Se for uma emergência (PARAR), zera a caixa de seleção de velocidade
+        # if comando == "PARAR":
+            #self.sp_velocidade.setValue(0)
+            #self.publish_mqtt_data("tunel/controle/sp_velocidade", "0.0")
 
+    # Encerra as portas de rede ao fechar a janela
     def closeEvent(self, event):
         self.cliente_mqtt.loop_stop()
         self.cliente_mqtt.disconnect()
@@ -277,12 +287,14 @@ class GUIOperacaoRemota(QMainWindow):
 
     # Operação via Teclado
     def keyPressEvent(self, event):
+        if event.isAutoRepeat(): return
+
         # Só permite pilotar se o sistema já tiver sido iniciado
         if self.btn_iniciar.isEnabled(): 
             return # Se o botão ainda está ativado, o robô está em Standby
         
         # Ignora as setas do teclado se estiver no modo automático
-        if self.modo_pendente == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
+        if self.modo_operacao == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
             return
 
         if event.key() == Qt.Key.Key_Right:
@@ -298,8 +310,10 @@ class GUIOperacaoRemota(QMainWindow):
             self.btn_para.setDown(True)
 
     def keyReleaseEvent(self, event):
+        if event.isAutoRepeat(): return
+
         # Levanta os botões na tela quando o usuário solta a tecla
-        if self.modo_pendente == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
+        if self.modo_operacao == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
             return
         
         if event.key() == Qt.Key.Key_Right:

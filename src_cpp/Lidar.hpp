@@ -5,7 +5,7 @@
 
 class LidarFilter {
 private:
-    std::vector<int> buffer;
+    std::vector<float> buffer;
     int head = 0;
     int window_size;
     float ultima_media = 0.0;

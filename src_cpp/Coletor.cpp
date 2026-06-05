@@ -1,7 +1,7 @@
 #include "Coletor.hpp"
 #include <mutex>
 #include <condition_variable>
-#include <cmath> // Necessário para pow() e sqrt()
+#include <cmath> 
 
 // Thread responsável por consumir os dados da fila, analisar a confiança e salvar no disco
 void t_coletor_dados(SensorBuffer& sensor) {
