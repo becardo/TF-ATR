@@ -47,9 +47,7 @@ void t_inspecao_camera(SensorBuffer& sensor) {
             std::cout << "[CAMERA] Inspecao concluida em " << elapsed.count() << " ms.\n";
         }
 
-        sensor.o_liga_camera = false;
-        sensor.e_inspecao = false; 
-        
+        sensor.o_liga_camera = false;        
         // O lock é liberado automaticamente ao voltar para o wait ou fim do loop
     }
 }

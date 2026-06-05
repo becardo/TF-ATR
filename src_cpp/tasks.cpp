@@ -56,62 +56,105 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
 
 // LIDAR / Reconstrução do teto: Processa média móvel e dispara Alarme 
 void t_reconstrucao_teto(SensorBuffer& sensor) {
-    LidarFilter filtro(5); // Filtro móvel com janela de 5 amostras
+    LidarFilter filtro(5);
 
-    // Inicializa o histórico do filtro circular com a altura ideal
-    for(int i = 0; i < 5; i++) { filtro.calcular(10.0f); }
+    // Inicializa histórico do filtro
+    for (int i = 0; i < 5; i++) {
+        filtro.calcular(10.0f);
+    }
+
+    bool alarme_ativo = false;
 
     boost::asio::io_context io_lidar;
-    boost::asio::steady_timer timer_lidar(io_lidar, boost::asio::chrono::milliseconds(100));
+    boost::asio::steady_timer timer_lidar(
+        io_lidar,
+        boost::asio::chrono::milliseconds(100)
+    );
 
     std::function<void(const boost::system::error_code&)> loop_lidar;
 
-    loop_lidar = ([&](const boost::system::error_code& erro){ 
-        if(erro) return;
+    loop_lidar = ([&](const boost::system::error_code& erro) {
+        if (erro) return;
 
         float leitura_lidar_real = 10.0f;
 
-        // Captura o dado bruto (com ruído)
+        // Leitura do último valor recebido
         {
-            std::lock_guard<std::mutex> lock_memoria(sensor.mtx_leituras);
+            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
             leitura_lidar_real = sensor.ultima_leitura_lidar;
         }
 
-        // Insere o dado novo no buffer circular
-        // Apaga o dado mais velho e devolve a média matemática das últimas 5 leituras
+        // Média móvel
         float media = filtro.calcular(leitura_lidar_real);
 
-        bool falha_detectada = false;
-        float altura_ideal = 10.0f;
-        float margem_erro = 0.5f;
+        const float altura_ideal = 10.0f;
+        const float margem_erro = 0.5f;
 
-        // Lógica de Detecção com logs protegidos para o console
-        if (media > (altura_ideal + margem_erro)){
-            {
-                std::lock_guard<std::mutex> lock_tela(mtx_console);
-                std::cout << "[LIDAR] FALHA: BURACO detectado! (Média: " << media << "m)\n";
-            }
-            falha_detectada = true;
-        }
-        else if(media < (altura_ideal - margem_erro)){
-            {
-                std::lock_guard<std::mutex> lock_tela(mtx_console);
-                std::cout << "[LIDAR] FALHA: SALIENCIA detectada! (Média: " << media << "m)\n";
-            }
-            falha_detectada = true;
-        }
+        bool falha_detectada =
+            (media > altura_ideal + margem_erro) ||
+            (media < altura_ideal - margem_erro);
 
-        // Disparo reativo do alarme por software para a Câmera e Slowdown
+        // Detectou falha
         if (falha_detectada) {
-            {
-                std::lock_guard<std::mutex> lock_camera(sensor.mtx_camera);
-                sensor.e_inspecao = true;     
-                sensor.o_liga_camera = true;  
-            } 
-            sensor.cv_camera.notify_one(); 
+
+            // Só registra e dispara a câmera na primeira vez
+            if (!alarme_ativo) {
+
+                {
+                    std::lock_guard<std::mutex> lock_tela(mtx_console);
+
+                    if (media > altura_ideal + margem_erro) {
+                        std::cout
+                            << "[LIDAR] FALHA: BURACO detectado! (Media: "
+                            << media << "m)\n";
+                    } else {
+                        std::cout
+                            << "[LIDAR] FALHA: SALIENCIA detectada! (Media: "
+                            << media << "m)\n";
+                    }
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(sensor.mtx_camera);
+
+                    sensor.e_inspecao = true;
+                    sensor.o_liga_camera = true;
+                }
+
+                sensor.cv_camera.notify_one();
+
+                alarme_ativo = true;
+            }
+        }
+        else {
+
+            // Se antes havia falha e agora voltou ao normal,
+            // então o robô já passou pela região defeituosa.
+            if (alarme_ativo) {
+
+                {
+                    std::lock_guard<std::mutex> lock_tela(mtx_console);
+                    std::cout
+                        << "[LIDAR] Regiao inspecionada concluida. "
+                        << "Alarme desligado.\n";
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(sensor.mtx_camera);
+
+                    sensor.e_inspecao = false;
+                    sensor.o_liga_camera = false;
+                }
+
+                alarme_ativo = false;
+            }
         }
 
-        timer_lidar.expires_at(timer_lidar.expiry() + boost::asio::chrono::milliseconds(100));
+        timer_lidar.expires_at(
+            timer_lidar.expiry() +
+            boost::asio::chrono::milliseconds(100)
+        );
+
         timer_lidar.async_wait(loop_lidar);
     });
 
