@@ -108,8 +108,11 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         // ----- Zona Crítica: Escrita no Buffer Compartilhado -----
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
-            nav.e_automatico = (nav_manager.getMode() == NavMode::AUTOMATIC);
-            nav.j_sp_velocidade = nav_manager.getTargetSpeed();
+            if (!nav.e_automatico && !nav.c_para && !em_inspecao) {
+                nav.j_sp_velocidade = nav.velocidade_joystick;
+            } else {
+                nav.j_sp_velocidade = nav_manager.getTargetSpeed();
+            }
         }
 
         timer_com_nav.expires_at(timer_com_nav.expiry() + boost::asio::chrono::milliseconds(80));

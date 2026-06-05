@@ -68,10 +68,6 @@ class RobotPhysicsSimulator:
         
         # Integra a aceleração para encontrar a velocidade (V = V0 + a*dt)
         self.velocidade_x += aceleracao_real * self.dt
-
-        # Removendo os comentários, desabilitamos a ré
-        if self.velocidade_x < 0.0: 
-           self.velocidade_x = 0.0 
             
         # Integra a velocidade para encontrar a nova posição (X = X0 + V*dt)
         self.posicao_x += self.velocidade_x * self.dt

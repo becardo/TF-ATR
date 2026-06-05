@@ -29,6 +29,7 @@ class GUIOperacaoRemota(QMainWindow):
 
         # "0" = Manual | "1" = Automático
         self.modo_operacao = "0" 
+        self.missao_iniciada = False
 
         # Temporizador de atualização da janela 
         self.timer_tela = QTimer()
@@ -46,16 +47,16 @@ class GUIOperacaoRemota(QMainWindow):
 
         # Painel de controle
         painel_controle = QWidget()
-        painel_controle.setFixedWidth(300)
+        painel_controle.setFixedWidth(380)
         layout_painel = QVBoxLayout(painel_controle)
         layout_painel.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         grupo_estados = QGroupBox("Telemetria do Robô")
         layout_estados = QFormLayout(grupo_estados)
         
-        self.lbl_modo = QLabel("MANUAL")
+        self.lbl_modo = QLabel("Selecionar")
         self.lbl_modo.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
-        self.lbl_inspecao = QLabel("SEM FALHAS")
+        self.lbl_inspecao = QLabel("Aguardando...")
         self.lbl_inspecao.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
         
         self.lbl_encoder = QLabel("0 m")
@@ -215,7 +216,10 @@ class GUIOperacaoRemota(QMainWindow):
         self.lbl_velocidade.setText(f"{self.ultima_velocidade:.2f} m/s")
         self.lbl_aceleracao.setText(f"{self.ultima_aceleracao:.2f} m/s²")
         
-        if self.status_inspecao == 1:
+        if not self.missao_iniciada:
+            self.lbl_inspecao.setText("Aguardando...")
+            self.lbl_inspecao.setStyleSheet("color: gray; font-weight: bold; font-size: 14px;")
+        elif self.status_inspecao == 1:
             self.lbl_inspecao.setText("ALARME: FALHA DETECTADA")
             self.lbl_inspecao.setStyleSheet("color: red; font-weight: bold; font-size: 14px;")
         else:
@@ -232,6 +236,7 @@ class GUIOperacaoRemota(QMainWindow):
 
     # Comunicação GUI - Rede
     def publish_iniciar( self):
+        self.missao_iniciada = True
         self.btn_iniciar.setText("INICIAR")
         self.publish_mqtt_data("tunel/cmd/modo", self.modo_operacao)
         self.publish_mqtt_data("tunel/cmd/iniciar", "1")
