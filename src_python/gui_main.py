@@ -98,20 +98,27 @@ class GUIOperacaoRemota(QMainWindow):
         self.btn_iniciar.clicked.connect(self.publish_iniciar)
 
         self.btn_continuar = QPushButton("Continuar")
-        self.btn_continuar.clicked.connect(lambda: self.publish_direcao("CONTINUAR"))
+        self.btn_continuar.setStyleSheet("background-color: #f0ad4e; color: black; font-weight: bold; height: 35px;")
+        self.btn_continuar.clicked.connect(self.publish_continuar)
         
-        self.btn_para = QPushButton("■ PARAR (Emergência)")
+        self.btn_para = QPushButton("PARAR (Emergência)")
         self.btn_para.setStyleSheet("background-color: #d9534f; color: white; font-weight: bold; height: 35px;")
-        self.btn_para.clicked.connect(lambda: self.publish_direcao("PARAR"))
+        self.btn_para.clicked.connect(self.publish_parar)
+
+        self.btn_finalizar = QPushButton("Finalizar Inspeção")
+        self.btn_finalizar.setStyleSheet("background-color: #337ab7; color: white; font-weight: bold; height: 35px;")
+        self.btn_finalizar.clicked.connect(self.publish_finalizar)
 
         layout_comandos.addWidget(self.btn_iniciar)
         layout_comandos.addWidget(self.btn_continuar)
         layout_comandos.addWidget(self.btn_para)
+        layout_comandos.addWidget(self.btn_finalizar)
 
         self.btn_esquerda.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_direita.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_para.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_continuar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_finalizar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_iniciar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_modo_auto.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_modo_man.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -210,6 +217,34 @@ class GUIOperacaoRemota(QMainWindow):
         self.publish_mqtt_data("tunel/cmd/modo", self.modo_operacao)
         self.publish_mqtt_data("tunel/cmd/iniciar", "1")
         self.btn_iniciar.setEnabled(False)
+
+    def publish_parar(self):
+        print("[GUI COMANDO] EMERGÊNCIA: Parando o robô!")
+        self.publish_mqtt_data("tunel/controle/direcao", "PARAR")
+        self.lbl_inspecao.setText("PARADA DE EMERGÊNCIA")
+        self.lbl_inspecao.setStyleSheet("color: red; font-weight: bold; font-size: 14px;")
+        self.setFocus()
+
+    def publish_continuar(self):
+        print("[GUI COMANDO] Retomando operação...")
+        self.publish_mqtt_data("tunel/controle/direcao", "CONTINUAR")
+        self.setFocus()
+
+    def publish_finalizar(self):
+        print("[GUI COMANDO] Finalizando inspeção e resetando sistema.")
+        # Puxa o freio de mão para cravar o robô
+        self.publish_mqtt_data("tunel/controle/direcao", "PARAR")
+        
+        # Informa a rede inteira (C++ e Física) que a missão acabou
+        self.publish_mqtt_data("tunel/sistema/status", "SIMULACAO_CONCLUIDA")
+        
+        # Restaura o estado da Interface
+        self.missao_iniciada = False
+        self.btn_iniciar.setText("Iniciar")
+        self.btn_iniciar.setEnabled(True)
+        self.lbl_inspecao.setText("Inspeção Finalizada")
+        self.lbl_inspecao.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
+        self.setFocus()
 
     def publish_mqtt_data(self, topic, payload):
         self.cliente_mqtt.publish(topic, payload)

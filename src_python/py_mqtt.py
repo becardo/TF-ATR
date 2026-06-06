@@ -9,6 +9,7 @@ aceleracao_recebida_cpp = 0.0
 status_inspecao = 0
 cpp_pronto = False  
 sistema_iniciado = False
+reset_solicitado = False
 
 # Callback de recebimento 
 # Atualiza as variáveis globais assim que uma ordem chega do C++ ou da GUI
@@ -26,6 +27,9 @@ def ao_receber_mensagem(client, userdata, msg):
         cpp_pronto = True
     elif topico == "tunel/cmd/iniciar" and payload == "1":
         sistema_iniciado = True
+    elif topico == "tunel/sistema/status" and payload == "SIMULACAO_CONCLUIDA":
+        sistema_iniciado = False
+        reset_solicitado = True
 
 if __name__ == "__main__":
     print("[SISTEMA] Inicializando Ponte MQTT com a Física do Robô...")
@@ -63,6 +67,22 @@ if __name__ == "__main__":
     try:
         # Motor em Tempo Real - 50Hz
         while True:
+            # --- O TELETRANSPORTE (HARD RESET) ---
+            if reset_solicitado:
+                print("\n[SIMULADOR FÍSICO] Reset Total: Robô teletransportado para o início do túnel!")
+                
+                # Joga a física velha fora e cria um carrinho 100% novo!
+                simulador = RobotPhysicsSimulator(dt=0.02) 
+                
+                # Zera as memórias de tempo e rede
+                tempo_simulado = 0.0
+                ultima_pos_enviada = -1.0 
+                aceleracao_recebida_cpp = 0.0
+                reset_solicitado = False
+                
+                # Pula para a próxima batida do motor para não processar nada velho
+                continue
+
             telemetria = simulador.obter_estado_telemetria(sensor_ligado=sistema_iniciado)
             pos_atual = telemetria["posicao_x"]
             vel_real = telemetria["velocidade_real"]
@@ -110,7 +130,7 @@ if __name__ == "__main__":
                 cliente_mqtt.publish("tunel/sistema/status", "SIMULACAO_CONCLUIDA", retain=True)
                 
                 time.sleep(0.5) 
-                break  # Quebra o laço de execução principal com segurança
+                #break  # Quebra o laço de execução principal com segurança
                 
             clock.tick(50) 
             tempo_simulado += 0.02

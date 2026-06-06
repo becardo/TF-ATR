@@ -66,21 +66,11 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
 
         // Leitura da Telemetria 
         float teto_atual = 0.0;
-        // double vel_real = 0.0;
-        // double esforco_motor = 0.0;
-        // int posicao_atual = 0;
 
         {
             std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
             teto_atual = sensor.ultima_leitura_lidar;
-            // vel_real = sensor.velocidade_real_medida;
-            // posicao_atual = sensor.ultima_leitura_encoder;
         }
-
-        /* {
-            std::lock_guard<std::mutex> lock(nav.mtx);
-            esforco_motor = nav.o_aceleracao;
-        } */
 
         // Fim da inspeção normal (Túnel 1 - final aberto)
         if (teto_atual > 15.0 && iniciado && !nav.inspecao_concluida) {
@@ -105,6 +95,12 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         nav_manager.updateMode(c_automatico, c_man);
         nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);
 
+        int posicao_atual = 0;
+        {
+            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+            posicao_atual = sensor.ultima_leitura_encoder;
+        }
+
         // Zona crítica: Escrita no Buffer compartilhado
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
@@ -118,7 +114,12 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
             } else {
                 if (nav.c_para || em_inspecao) {
                     nav.j_sp_velocidade = 0.0;
-                } else {
+                }
+                // Se a posição for 0 e tentar dar ré, corta o motor
+                else if (posicao_atual <= 0 && nav.velocidade_joystick < 0.0) {
+                    nav.j_sp_velocidade = 0.0; 
+                } 
+                else {
                     nav.j_sp_velocidade = nav.velocidade_joystick;
                 }
             }
@@ -165,6 +166,10 @@ void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         }
 
         // Cálculo do PID
+        if (setpoint_atual == 0.0) {
+            pid.reset();
+        }
+
         double saida_aceleracao = pid.compute(static_cast<double>(setpoint_atual), velocidade_atual_robo);
 
         // Trava de segurança para fim de curso do túnel estendido de 250 metros

@@ -56,8 +56,20 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
             std::cout << "[SINCRONISMO] Sinal 'PYTHON_READY' capturado.\n";
         }
         else if (payload == "SIMULACAO_CONCLUIDA") {
-            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
-            sensor.simulo_concluida = true;
+            {
+                std::lock_guard<std::mutex> lock_sensor(sensor.mtx_leituras);
+                sensor.ultima_leitura_encoder = 0;
+                sensor.ultima_leitura_lidar = 0.0;
+                sensor.velocidade_real_medida = 0.0;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock_nav(nav.mtx);
+                nav.c_para = true;
+                nav.velocidade_joystick = 0.0;
+                nav.e_automatico = false;
+                nav.sistema_iniciado = false;
+            }
             std::cout << "[FIM DE CURSO] Sinal 'SIMULACAO_CONCLUIDA' recebido do Python.\n";
         }
     }
@@ -131,11 +143,24 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
             nav.velocidade_joystick = -memoria_spinbox; // Dá ré
         } 
         else if (payload == "PARAR") {
-            nav.c_para = true;
-            nav.velocidade_joystick = 0.0; // Paraliza a operação/emergência
+            nav.c_para = true; 
+            std::cout << "[MQTT-IN] EMERGÊNCIA acionada.\n";
         }
         else if (payload == "CONTINUAR") {
-            nav.c_para = false; // Solta o freio de emergência
+            nav.c_para = false; 
+            std::cout << "[MQTT-IN] RETOMANDO: Emergência desativada.\n";
+        }
+        else if (payload == "SIMULACAO_CONCLUIDA") {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            nav.c_para = true;
+            nav.velocidade_joystick = 0.0;
+            nav.e_automatico = false;
+
+            sensor.ultima_leitura_lidar = 0.0;
+            sensor.ultima_leitura_encoder = 0;
+            sensor.velocidade_real_medida = 0.0;
+
+            std::cout << "[MQTT-IN] STATUS: SIMULAÇÃO CONCLUÍDA!\n";
         }
     }
     // Iniciar a Inspeção
@@ -247,18 +272,6 @@ void t_comunicacao_mqtt(){
     auto proximo_ciclo = std::chrono::steady_clock::now();
 
     while(true) {
-        // Lógica para encerramento do sistema
-        bool encerrar_sistema = false;
-        {
-            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
-            encerrar_sistema = sensor.simulo_concluida;
-        }
-
-        if (encerrar_sistema) {
-            std::cout << "[SISTEMA-MQTT] Encerrando publicações cíclicas.\n";
-            break; 
-        }
-
         proximo_ciclo += std::chrono::milliseconds(50);
 
         double controle_pid_aceleracao;
