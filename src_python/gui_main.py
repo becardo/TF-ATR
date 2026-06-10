@@ -6,10 +6,13 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout,
                              QSplitter, QGroupBox, QFormLayout)
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
 
-# Importando a visualização 2D protegida contra falhas X11
+# Importando a visualização 2D e Gráfico da superficie
 from view_2d import PygameWidget
+from grafico_lidar import GraficoLidar
 
+# Classe para comunicação do MQTT com a interface
 class SinaisMQTT(QObject):
+    
     dados_recebidos = pyqtSignal(str, str)
 
 class GUIOperacaoRemota(QMainWindow):
@@ -18,26 +21,31 @@ class GUIOperacaoRemota(QMainWindow):
         self.setWindowTitle("ATR 2026/1 - GUI Operação Remota (Centro de Controle)")
         self.setGeometry(100, 100, 1100, 750)
 
+        # cria sistema de sinais para atualizar a interface 
         self.sinais = SinaisMQTT()
+        # Sempre que um dado MQTT chega, chama processar_atualizacao_gui()
         self.sinais.dados_recebidos.connect(self.processar_atualizacao_gui)
 
+        # Armazena a telemetria mais recente
         self.ultimo_encoder = 0
         self.ultima_velocidade = 0.0
         self.ultimo_lidar = 10.0
         self.ultima_aceleracao = 0.0
         self.status_inspecao = 0
 
-        self.modo_operacao = "0" 
-        self.missao_iniciada = False
+        self.modo_operacao = "0" # Modo inicial Manual 
+        self.missao_iniciada = False # Missão começa não iniciada
 
+        # Timer que atualiza a interface a cada 100ms
         self.timer_tela = QTimer()
         self.timer_tela.timeout.connect(self.atualizar_tela)
         self.timer_tela.start(100) 
 
-        self.init_ui()
-        self.init_mqtt()
+        self.init_ui() # Monta a interface
+        self.init_mqtt() # Inicializa a comunicação MQTT
 
     def init_ui(self):
+        # Interface gráfica: janela, botões, labels e layouts
         widget_central = QWidget()
         self.setCentralWidget(widget_central)
         layout_principal = QHBoxLayout(widget_central)
@@ -146,61 +154,80 @@ class GUIOperacaoRemota(QMainWindow):
         self.container_graficos.setStyleSheet("background-color: #151515; border: 2px solid #333; border-radius: 6px;")
         
         layout_graf = QVBoxLayout(self.container_graficos)
-        self.lbl_graf_placeholder = QLabel("GRÁFICO DE PERFIL DO TETO (DADOS DO LIDAR FILTRADOS)\nEixo X: Encoder (m) | Eixo Y: Altura Recalculada (m)", self.container_graficos)
-        self.lbl_graf_placeholder.setStyleSheet("color: #00ff00; font-family: monospace;")
-        self.lbl_graf_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout_graf.addWidget(self.lbl_graf_placeholder)
+        layout_graf.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        self.grafico_realtime = GraficoLidar(self.container_graficos) # Cria o objeto da classe GraficoLidar
+        layout_graf.addWidget(self.grafico_realtime) # Gráfico aparecer na tela
 
         divisor_visualizacao.addWidget(self.container_simulacao)
         divisor_visualizacao.addWidget(self.container_graficos)
-        divisor_visualizacao.setSizes([420, 280])
+        divisor_visualizacao.setSizes([420, 300])
 
         layout_principal.addWidget(divisor_visualizacao)
 
     def init_mqtt(self):
+        # Cria cliente MQTT
         self.cliente_mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        # Define qual função será chamada ao receber mensagem
         self.cliente_mqtt.on_message = self.ao_receber_mensagem
         
         try:
-            self.cliente_mqtt.connect("localhost", 1883, 60)
+            # Conecta ao broker Mosquitto local
+            self.cliente_mqtt.connect("localhost", 1883, 60)   
+
+            # Inscreve a GUI nos tópicos da telemetria
             self.cliente_mqtt.subscribe("tunel/sensor/encoder")
             self.cliente_mqtt.subscribe("tunel/sensor/lidar")
             self.cliente_mqtt.subscribe("tunel/sensor/velocidade")
             self.cliente_mqtt.subscribe("tunel/cmd/aceleracao")
             self.cliente_mqtt.subscribe("tunel/status/inspecao")
+
+            # Inicia a thread de comunicação
             self.cliente_mqtt.loop_start()
+
             print("[GUI MQTT] Conectado com sucesso ao Broker Mosquitto.")
+
         except Exception as e:
             print(f"[ERRO GUI MQTT] Não foi possível conectar ao Broker: {e}")
 
-    def ao_receber_mensagem(self, client, userdata, msg):
+    def ao_receber_mensagem(self, msg):
+        # Converte a mensagem recebida do MQTT em um sinal Qt para a interface
         self.sinais.dados_recebidos.emit(msg.topic, msg.payload.decode())
 
     def processar_atualizacao_gui(self, topico, payload):
-        if topico == "tunel/sensor/encoder":
+        # Atualização dos dados internos
+
+        if topico == "tunel/sensor/encoder":      # Atualiza encoder recebido
             self.ultimo_encoder = int(payload)
-        elif topico == "tunel/sensor/lidar":
+        elif topico == "tunel/sensor/lidar":      # Atualiza leitura LIDAR 
             self.ultimo_lidar = float(payload)
-        elif topico == "tunel/sensor/velocidade":
+        elif topico == "tunel/sensor/velocidade": # Atualiza velocidade
             self.ultima_velocidade = float(payload)
-        elif topico == "tunel/cmd/aceleracao":
+        elif topico == "tunel/cmd/aceleracao":    # Atualiza aceleração
             self.ultima_aceleracao = float(payload)
-        elif topico == "tunel/status/inspecao":
+        elif topico == "tunel/status/inspecao":   # Atualiza estado da inspeção
             self.status_inspecao = int(payload)
 
     def atualizar_tela(self):
+        # Atualização dos indicadores numéricos 
+
         self.lbl_encoder.setText(f"{self.ultimo_encoder} m")
         self.lbl_lidar.setText(f"{self.ultimo_lidar:.2f} m")
         self.lbl_velocidade.setText(f"{self.ultima_velocidade:.2f} m/s")
         self.lbl_aceleracao.setText(f"{self.ultima_aceleracao:.2f} m/s²")
         
+        # Atualiza visualização 2D
         self.pygame_simulador.atualizar_dados(
             self.ultimo_encoder, 
             self.ultima_velocidade, 
             self.ultimo_lidar, 
             self.status_inspecao
         )
-        
+
+        # Atualiza gráfico LIDAR
+        if self.missao_iniciada:
+            self.grafico_realtime.atualizar_ponto(self.ultimo_encoder, self.ultimo_lidar)
+
         if not self.missao_iniciada:
             self.lbl_inspecao.setText("Aguardando...")
             self.lbl_inspecao.setStyleSheet("color: gray; font-weight: bold; font-size: 14px;")
@@ -212,6 +239,7 @@ class GUIOperacaoRemota(QMainWindow):
             self.lbl_inspecao.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
 
     def publish_iniciar(self):
+        # Inicia a inspeção
         self.missao_iniciada = True
         self.btn_iniciar.setText("INICIAR")
         self.publish_mqtt_data("tunel/cmd/modo", self.modo_operacao)
@@ -219,6 +247,7 @@ class GUIOperacaoRemota(QMainWindow):
         self.btn_iniciar.setEnabled(False)
 
     def publish_parar(self):
+        # Comando parar/pausar inspeção
         print("[GUI COMANDO] EMERGÊNCIA: Parando o robô!")
         self.publish_mqtt_data("tunel/controle/direcao", "PARAR")
         self.lbl_inspecao.setText("PARADA DE EMERGÊNCIA")
@@ -226,17 +255,22 @@ class GUIOperacaoRemota(QMainWindow):
         self.setFocus()
 
     def publish_continuar(self):
+        # Comando continuar inspeção (reverte o botão parar)
         print("[GUI COMANDO] Retomando operação...")
         self.publish_mqtt_data("tunel/controle/direcao", "CONTINUAR")
         self.setFocus()
 
     def publish_finalizar(self):
+        # Comando de finalizar inspeção 
+
         print("[GUI COMANDO] Finalizando inspeção e resetando sistema.")
         # Puxa o freio de mão para cravar o robô
         self.publish_mqtt_data("tunel/controle/direcao", "PARAR")
         
         # Informa a rede inteira (C++ e Física) que a missão acabou
         self.publish_mqtt_data("tunel/sistema/status", "SIMULACAO_CONCLUIDA")
+
+        self.grafico_realtime.resetar_grafico()
         
         # Restaura o estado da Interface
         self.missao_iniciada = False
@@ -247,9 +281,11 @@ class GUIOperacaoRemota(QMainWindow):
         self.setFocus()
 
     def publish_mqtt_data(self, topic, payload):
+        # Publica mensagem MQTT
         self.cliente_mqtt.publish(topic, payload)
 
-    def publish_comando(self, tipo, valor):
+    def publish_comando(self, valor):
+        # Seleção do tipo de comando, Manual ou Automático 
         if valor == "AUTOMATICO":
             self.modo_operacao = "1"
             self.lbl_modo.setText("AUTOMÁTICO")
@@ -265,21 +301,30 @@ class GUIOperacaoRemota(QMainWindow):
             self.btn_direita.setEnabled(True)
             self.publish_mqtt_data("tunel/controle/modo", "MANUAL")
             
-        self.btn_iniciar.setEnabled(True) 
+        self.btn_iniciar.setEnabled(True)  # Botão inicar só é habilitado após escolha do modo
 
     def publish_direcao(self, comando):
         print(f"[GUI COMANDO] Enviando ação de movimentação: {comando}")
+        # Envia comando de movimento para controlar o robô
         self.publish_mqtt_data("tunel/controle/direcao", comando)
 
     def closeEvent(self, event):
-        self.cliente_mqtt.loop_stop()
-        self.cliente_mqtt.disconnect()
-        self.pygame_simulador.close()
-        event.accept()
+        # Encerramento
+        self.cliente_mqtt.loop_stop()  # Para a thread MQTT
+        self.cliente_mqtt.disconnect() # Fecha conexão MQTT
+        self.pygame_simulador.close()  # Encerra o simulador Pygame
+        event.accept() # Fechamento da janela
 
     def keyPressEvent(self, event):
-        if event.isAutoRepeat(): return
-        if self.btn_iniciar.isEnabled(): return 
+        # Executa quando a tecla é pressionada
+
+        if event.isAutoRepeat(): # Ignora eventos repetidos
+            return
+        
+        if self.btn_iniciar.isEnabled(): # Ignora comandos se a inspeção ainda n foi iniciada
+            return 
+        
+        # Em modo automático, não controla a operação
         if self.modo_operacao == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
             return
 
@@ -294,7 +339,11 @@ class GUIOperacaoRemota(QMainWindow):
             self.btn_para.setDown(True)
 
     def keyReleaseEvent(self, event):
-        if event.isAutoRepeat(): return
+        # Executando quando a tecla é solta
+
+        if event.isAutoRepeat(): 
+            return
+        
         if self.modo_operacao == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
             return
         
