@@ -45,8 +45,40 @@ class RobotPhysicsSimulator:
         for i in range(idx_ini_sua, idx_fim_sua):
             progresso = (i - idx_ini_sua) / (idx_fim_sua - idx_ini_sua)
             perfil[i] = 10.0 - 1.5 * math.sin(progresso * math.pi)
+
+        # === Bloco 2 de anomalias 50m - 150m ===
+
+        # Saliência triangular: do metro 60 ao metro 63
+        idx_ini_tri_sal, idx_fim_tri_sal = int(60 / self.resolucao_mapa), int(63 / self.resolucao_mapa)
+        meio_tri_sal = (idx_ini_tri_sal + idx_fim_tri_sal) // 2
+
+        for i in range(idx_ini_tri_sal, idx_fim_tri_sal):
+            if i <= meio_tri_sal:
+                # subida da saliência
+                perfil[i] = 10.0 - 1.0 * ((i - idx_ini_tri_sal) / (meio_tri_sal - idx_ini_tri_sal))
+            else:
+                # descida da saliência
+                perfil[i] = 9.0 + 1.0 * ((i - meio_tri_sal) / (idx_fim_tri_sal - meio_tri_sal))
+
+        # Buraco triangular: do metro 84 ao metro 88
+        idx_ini_tri_bur, idx_fim_tri_bur = int(84 / self.resolucao_mapa), int(88 / self.resolucao_mapa)
+        meio_tri_bur = (idx_ini_tri_bur + idx_fim_tri_bur) // 2
+
+        for i in range(idx_ini_tri_bur, idx_fim_tri_bur):
+            if i <= meio_tri_bur:
+                # abertura do buraco
+                perfil[i] = 10.0 + 1.3 * ((i - idx_ini_tri_bur) / (meio_tri_bur - idx_ini_tri_bur))
+            else:
+                # fechamento do buraco
+                perfil[i] = 11.3 - 1.3 * ((i - meio_tri_bur) / (idx_fim_tri_bur - meio_tri_bur))
+
+        # Buraco retangular: do metro 134 ao metro 138
+        idx_ini_bur_ret, idx_fim_bur_ret = int(134 / self.resolucao_mapa), int(138 / self.resolucao_mapa)
+
+        for i in range(idx_ini_bur_ret, idx_fim_bur_ret):
+            perfil[i] = 11.8
             
-        # === Bloco 2 de anomalias 150m - 250m ===
+        # === Bloco 3 de anomalias 150m - 250m ===
 
         # Buraco retangular (Degrau seco): do metro 150 ao metro 155
         idx_ini_b2, idx_fim_b2 = int(150 / self.resolucao_mapa), int(155 / self.resolucao_mapa)
