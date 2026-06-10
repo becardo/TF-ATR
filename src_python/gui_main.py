@@ -190,7 +190,7 @@ class GUIOperacaoRemota(QMainWindow):
         except Exception as e:
             print(f"[ERRO GUI MQTT] Não foi possível conectar ao Broker: {e}")
 
-    def ao_receber_mensagem(self, msg):
+    def ao_receber_mensagem(self, client, userdata, msg):
         # Converte a mensagem recebida do MQTT em um sinal Qt para a interface
         self.sinais.dados_recebidos.emit(msg.topic, msg.payload.decode())
 
@@ -279,12 +279,13 @@ class GUIOperacaoRemota(QMainWindow):
         self.lbl_inspecao.setText("Inspeção Finalizada")
         self.lbl_inspecao.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
         self.setFocus()
+        self.closeEvent()
 
     def publish_mqtt_data(self, topic, payload):
         # Publica mensagem MQTT
         self.cliente_mqtt.publish(topic, payload)
 
-    def publish_comando(self, valor):
+    def publish_comando(self, tipo, valor):
         # Seleção do tipo de comando, Manual ou Automático 
         if valor == "AUTOMATICO":
             self.modo_operacao = "1"
