@@ -14,7 +14,7 @@ reset_solicitado = False
 # Callback de recebimento 
 # Atualiza as variáveis globais assim que uma ordem chega do C++ ou da GUI
 def ao_receber_mensagem(client, userdata, msg):
-    global aceleracao_recebida_cpp, status_inspecao, cpp_pronto, sistema_iniciado
+    global aceleracao_recebida_cpp, status_inspecao, cpp_pronto, sistema_iniciado, reset_solicitado
     
     topico = msg.topic
     payload = msg.payload.decode()
@@ -68,7 +68,7 @@ if __name__ == "__main__":
         # Motor em Tempo Real - 50Hz
         while True:
             # --- O TELETRANSPORTE (HARD RESET) ---
-            if reset_solicitado:
+            if reset_solicitado and aceleracao_recebida_cpp == 0.0:
                 print("\n[SIMULADOR FÍSICO] Reset Total: Robô teletransportado para o início do túnel!")
                 
                 # Joga a física velha fora e cria um carrinho 100% novo!

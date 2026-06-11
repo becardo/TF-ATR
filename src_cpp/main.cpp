@@ -208,7 +208,7 @@ int main() {
     std::thread th_distancia(t_calculo_distancia, std::ref(nav), std::ref(sensor));
     std::thread th_teto(t_reconstrucao_teto, std::ref(sensor));
     std::thread th_camera(t_inspecao_camera, std::ref(sensor));
-    std::thread th_coletor(t_coletor_dados, std::ref(sensor));
+    std::thread th_coletor(t_coletor_dados, std::ref(sensor), std::ref(nav));
     std::thread thread_mqtt(t_comunicacao_mqtt); 
 
     // Sincronismo estruturado de encerramento determinístico

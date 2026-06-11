@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import sys
+import os
+import shutil
+import datetime
 import paho.mqtt.client as mqtt
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, 
                              QVBoxLayout, QPushButton, QFrame, QLabel, 
@@ -271,6 +274,23 @@ class GUIOperacaoRemota(QMainWindow):
         self.publish_mqtt_data("tunel/sistema/status", "SIMULACAO_CONCLUIDA")
 
         self.grafico_realtime.resetar_grafico()
+
+        # Gera uma cópia própria da inspeção feita 
+        arquivo_base = "telemetria_inspecao.csv"
+        
+        if os.path.exists(arquivo_base):
+            # Cria o sufixo com Ano, Mês, Dia, Hora, Minuto e Segundo
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            nome_historico = f"historico_inspecao_{timestamp}.csv"
+            
+            try:
+                # Copia o arquivo fixo gerando o log histórico desta corrida
+                shutil.copy2(arquivo_base, nome_historico)
+                print(f"[GUI] Histórico salvo com sucesso: {nome_historico}")
+            except Exception as e:
+                print(f"[ERRO] Falha ao clonar o arquivo de log: {e}")
+        else:
+            print("[AVISO] Arquivo base não encontrado. Nenhuma cópia gerada.")
         
         # Restaura o estado da Interface
         self.missao_iniciada = False
@@ -279,7 +299,6 @@ class GUIOperacaoRemota(QMainWindow):
         self.lbl_inspecao.setText("Inspeção Finalizada")
         self.lbl_inspecao.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
         self.setFocus()
-        self.closeEvent()
 
     def publish_mqtt_data(self, topic, payload):
         # Publica mensagem MQTT

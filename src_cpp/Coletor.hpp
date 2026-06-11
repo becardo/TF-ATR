@@ -44,6 +44,6 @@ public:
 };
 
 // Protótipo da função da thread
-void t_coletor_dados(SensorBuffer& sensor);
+void t_coletor_dados(SensorBuffer& sensor, NavBuffer& nav);
 
 #endif
