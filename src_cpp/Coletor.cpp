@@ -60,8 +60,6 @@ void t_coletor_dados(SensorBuffer& sensor, NavBuffer& nav) {
             Medicao dado = sensor.fila_medicoes.front();
             sensor.fila_medicoes.pop();
 
-            // Inicia nova inspeção: arquivo CSV é renovado
-
             // --- Análise de Confiança ---
             
             // Calcula a distância entre o ponto atual e o último ponto

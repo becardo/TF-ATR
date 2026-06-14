@@ -184,6 +184,7 @@ class GUIOperacaoRemota(QMainWindow):
             self.cliente_mqtt.subscribe("tunel/sensor/velocidade")
             self.cliente_mqtt.subscribe("tunel/cmd/aceleracao")
             self.cliente_mqtt.subscribe("tunel/status/inspecao")
+            self.cliente_mqtt.subscribe("tunel/sensor/camera")
 
             # Inicia a thread de comunicação
             self.cliente_mqtt.loop_start()
@@ -210,6 +211,12 @@ class GUIOperacaoRemota(QMainWindow):
             self.ultima_aceleracao = float(payload)
         elif topico == "tunel/status/inspecao":   # Atualiza estado da inspeção
             self.status_inspecao = int(payload)
+        elif topico == "tunel/sensor/camera":
+            print(f"\033[1;36m[DEBUG GUI] Sinal Câmera: '{payload}'\033[0m")
+            
+            if "CLICK" in payload: 
+                print("\033[1;32m[DEBUG GUI] Acionando Pygame!\033[0m")
+                self.pygame_simulador.disparar_flash_camera()
 
     def atualizar_tela(self):
         # Atualização dos indicadores numéricos 
@@ -235,7 +242,7 @@ class GUIOperacaoRemota(QMainWindow):
             self.lbl_inspecao.setText("Aguardando...")
             self.lbl_inspecao.setStyleSheet("color: gray; font-weight: bold; font-size: 14px;")
         elif self.status_inspecao == 1:
-            self.lbl_inspecao.setText("ALARME: FALHA DETECTADA")
+            self.lbl_inspecao.setText("FALHA DETECTADA")
             self.lbl_inspecao.setStyleSheet("color: red; font-weight: bold; font-size: 14px;")
         else:
             self.lbl_inspecao.setText("TETO INTEGRAL")

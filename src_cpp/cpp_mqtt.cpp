@@ -14,6 +14,7 @@
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <condition_variable>
 #include <iostream>
 #include <string>
 #include <boost/asio.hpp>
@@ -33,8 +34,10 @@ extern NavBuffer nav;
 
 static double memoria_spinbox = 1.0;
 
-// Flag de sincronismo. Backend C++ aguarda até que o simulador Python diga "PYTHON_READY"
-volatile bool python_reconhecido = false;
+// Variáveis de sincronismo. Backend C++ aguarda até que o simulador Python diga "PYTHON_READY"
+std::mutex mtx_handshake;
+std::condition_variable cv_handshake;
+bool python_reconhecido = false;
 
 // CALLBACK - Processamento de dados recebidos da rede MQTT
 // - Receber dados de sensores
@@ -52,7 +55,13 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
         if (payload == "PYTHON_READY") { // Broker conectado
             std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
             sensor.python_conectado = true; // Marca o simulador como disponível
-            python_reconhecido = true; // Libera o handshake
+
+            {
+                std::lock_guard<std::mutex> lock_hs(mtx_handshake);
+                python_reconhecido = true;
+            }
+            cv_handshake.notify_one(); // Acorda a thread
+
             std::cout << "[SINCRONISMO] Sinal 'PYTHON_READY' capturado.\n";
         }
         else if (payload == "SIMULACAO_CONCLUIDA") {
@@ -84,51 +93,56 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
             nav.c_man = true;
         }
     }
-    // Novo setpoint de velocidade, para o caso de controle Manual 
-    // (onde é possível escolher o novo setpoint)
-    else if (topico == "tunel/controle/sp_velocidade") {
-        std::lock_guard<std::mutex> lock(nav.mtx);
-        try {
-            memoria_spinbox = std::stof(payload);
-            std::cout << "[GUI-IN] Novo Setpoint de Velocidade: " << payload << " m/s\n";
-        } catch (...) { } // Ignora se tiver lixo
-    }
     // Dados físicos da posição do robô, recebe leituras do encoder
     else if (topico == "tunel/sensor/encoder") {
-        int leitura_encoder = std::stoi(payload);
-        
-        {
-            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
-            sensor.ultima_leitura_encoder = leitura_encoder; // Atualização da última leitura
+        try {
+            // Tolerância a falhas de rede: Evita a quebra do processo C++ ao tentar converter payloads malformados.
+            // Se a conversão falhar, a exceção é capturada, o pacote sujo é descartado, e o robô mantém sua estabilidade.
+            int leitura_encoder = std::stoi(payload);
+            
+            {
+                std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+                sensor.ultima_leitura_encoder = leitura_encoder; // Atualização da última leitura
+            }
+            
+            { // criação da medição
+                std::lock_guard<std::mutex> lock(sensor.mtx_fila);
+
+                Medicao nova_medicao;  // Estrutura de um instante completo de observação
+                                    // - posição encoder
+                                    // - leitura lidar
+                                    // - timestamp
+                                    // - nível de confiança
+
+                nova_medicao.i_encoder = leitura_encoder; // Valor absoluto do encoder
+                nova_medicao.timestamp = std::chrono::steady_clock::now()
+                    .time_since_epoch()
+                    .count(); // Momento em que a medição foi recebida
+                nova_medicao.i_lidar = sensor.ultima_leitura_lidar; // Associa último valor LIDAR conhecido
+                nova_medicao.nivel_confianca = 100;
+                sensor.fila_medicoes.push(nova_medicao); // Insere a medição na fila compartilhada
+            }
+
+            // Avisa a thread do coletor que tem uma nova medição para ser gravada
+            sensor.cv_coletor.notify_one();
         }
-        
-        { // criação da medição
-            std::lock_guard<std::mutex> lock(sensor.mtx_fila);
-
-            Medicao nova_medicao;  // Estrutura de um instante completo de observação
-                                   // - posição encoder
-                                   // - leitura lidar
-                                   // - timestamp
-                                   // - nível de confiança
-
-            nova_medicao.i_encoder = leitura_encoder; // Valor absoluto do encoder
-            nova_medicao.timestamp = std::chrono::steady_clock::now()
-                .time_since_epoch()
-                .count(); // Momento em que a medição foi recebida
-            nova_medicao.i_lidar = sensor.ultima_leitura_lidar; // Associa último valor LIDAR conhecido
-            nova_medicao.nivel_confianca = 100;
-            sensor.fila_medicoes.push(nova_medicao); // Insere a medição na fila compartilhada
-        }
-
-        // Avisa a thread do coletor que tem uma nova medição para ser gravada
-        sensor.cv_coletor.notify_one(); 
+        catch (const std::exception& e) {
+            std::cerr << "[ERRO MQTT] Lixo de rede descartado no Encoder: '" << payload << "'\n";
+        } 
     } 
     // Dados físicos da leitura do teto
     else if (topico == "tunel/sensor/lidar") {
-        float leitura_lidar = std::stof(payload);
-        {
-            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
-            sensor.ultima_leitura_lidar = leitura_lidar;
+        try {
+            // Tolerância a falhas de rede: Evita a quebra do processo C++ ao tentar converter payloads malformados.
+            // Se a conversão falhar, a exceção é capturada, o pacote sujo é descartado, e o robô mantém sua estabilidade.
+            float leitura_lidar = std::stof(payload);
+            {
+                std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+                sensor.ultima_leitura_lidar = leitura_lidar;
+            }
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[ERRO MQTT] Lixo de rede descartado no LIDAR: '" << payload << "\n";
         }
     }
     // Comandos botões: modo Manual (DIREITA/ESQUERDA) e geral (PARAR/CONTINUAR)
@@ -174,12 +188,19 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
     }
     // Velocidade medida
     else if (topico == "tunel/sensor/velocidade") {
-        double vel = std::stod(payload);
+        try {
+            // Tolerância a falhas de rede: Evita a quebra do processo C++ ao tentar converter payloads malformados.
+            // Se a conversão falhar, a exceção é capturada, o pacote sujo é descartado, e o robô mantém sua estabilidade.
+            double vel = std::stod(payload);
 
-        // Recebe a velocidade calculada pelo simulador físico
-        // Utilizada para realimentação do controlador e exibição na interface
-        std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
-        sensor.velocidade_real_medida = vel;
+            // Recebe a velocidade calculada pelo simulador físico
+            // Utilizada para realimentação do controlador e exibição na interface
+            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+            sensor.velocidade_real_medida = vel;
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[ERRO MQTT] Lixo de rede descartado na Velocidade: '" << payload << "\n";
+        }
     }
     // Captura a ordem de mudança de modo vinda do botão "INICIAR"
     else if (topico == "tunel/controle/modo" || topico == "tunel/cmd/modo") {
@@ -240,21 +261,21 @@ void t_comunicacao_mqtt(){
     std::cout << "[SISTEMA] Thread MQTT Conectada. Inicializando Handshake com a Interface...\n";
 
     // Inscrição nos tópicos de Sensores, Sincronismo e Controles da GUI
+    // QoS nível 1: "Pelo menos uma vez". A mensagem tem garantia absoluta de que vai chegar.
+    MQTTClient_subscribe(client, "tunel/sensor/camera", 1);
     MQTTClient_subscribe(client, "tunel/sistema/status", 1);
     MQTTClient_subscribe(client, "tunel/sensor/encoder", 1);
     MQTTClient_subscribe(client, "tunel/sensor/lidar", 1);
     MQTTClient_subscribe(client, "tunel/controle/modo", 1);
-    MQTTClient_subscribe(client, "tunel/controle/sp_velocidade", 1);
     MQTTClient_subscribe(client, "tunel/controle/direcao", 1);
     MQTTClient_subscribe(client, "tunel/cmd/iniciar", 1);
     MQTTClient_subscribe(client, "tunel/sensor/velocidade", 1);
     MQTTClient_subscribe(client, "tunel/cmd/modo", 1);
     MQTTClient_subscribe(client, "tunel/controle/modo", 1);
 
-    // Handshake
-    // Aguarda até que o simulador Python envie o sinal
-    while (!python_reconhecido) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    {
+        std::unique_lock<std::mutex> lock_hs(mtx_handshake);
+        cv_handshake.wait(lock_hs, [] { return python_reconhecido; });
     }
 
     MQTTClient_message msg_handshake = MQTTClient_message_initializer;
@@ -262,7 +283,8 @@ void t_comunicacao_mqtt(){
     std::string payload_ready = "CPP_READY"; // Resposta do Backend após reconhecer o Python
     msg_handshake.payload = (void*)payload_ready.c_str();
     msg_handshake.payloadlen = payload_ready.length();
-    msg_handshake.qos = 1; msg_handshake.retained = 1;
+    msg_handshake.qos = 1; 
+    msg_handshake.retained = 1;
     MQTTClient_publishMessage(client, "tunel/sistema/status", &msg_handshake, NULL);
     std::cout << "[OK] Handshake Concluído! Enviado 'CPP_READY'.\n";
 
@@ -271,31 +293,65 @@ void t_comunicacao_mqtt(){
     
     auto proximo_ciclo = std::chrono::steady_clock::now();
 
+    // Variável para detectar a "borda de subida" do alarme
+    int estado_anterior_alarme = 0;
+
     while(true) {
         proximo_ciclo += std::chrono::milliseconds(50);
 
         double controle_pid_aceleracao;
         int controle_status_alarme;
         double velocidade_atual_calculada;
+        bool estado_atual_alarme;
 
         // Captura das variáveis de controle e odometria
         {
             std::lock_guard<std::mutex> lock_nav(nav.mtx);
             controle_pid_aceleracao = nav.o_aceleracao;
         }
+
         {
             std::lock_guard<std::mutex> lock_cam(sensor.mtx_camera);
             // Converte o estado booleano da inspeção
             // para um valor inteiro adequado para
             // transmissão MQTT
-            controle_status_alarme = sensor.e_inspecao ? 1 : 0;
+            controle_status_alarme = sensor.e_inspecao;
         }
+
         {
             std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
             velocidade_atual_calculada = sensor.velocidade_real_medida;
         }
 
+        {
+            std::lock_guard<std::mutex> lock_cam(sensor.mtx_camera);
+            estado_atual_alarme = sensor.e_inspecao;
+        }
+
         // Publicações
+
+        // Publica a ação da câmera
+        if (estado_atual_alarme != 0 && estado_anterior_alarme == 0) {
+            std::string payload_cam = "CLICK";
+            MQTTClient_message msg_camera = MQTTClient_message_initializer;
+            msg_camera.payload = (void*)payload_cam.c_str();
+            msg_camera.payloadlen = payload_cam.length();
+            msg_camera.qos = 1; 
+            msg_camera.retained = 0;
+            
+            MQTTClient_publishMessage(
+                client, 
+                "tunel/sensor/camera", 
+                &msg_camera, 
+                NULL
+            );
+            
+            // Log impossível de ignorar no terminal C++
+            std::cout << "[MQTT-OUT] Pulso de FLASH enviado para o Python.\n";
+        }
+        // Atualiza a memória para o próximo ciclo
+        estado_anterior_alarme = estado_atual_alarme;
+
         // Publica a aceleração para o simulador do Python rodar a física
         std::string payload_accel = std::to_string(controle_pid_aceleracao);
         MQTTClient_message msg_aceleracao = MQTTClient_message_initializer;
@@ -343,10 +399,10 @@ void t_comunicacao_mqtt(){
     }
 
     // Liberação e desconexão limpa de portas
+    MQTTClient_unsubscribe(client, "tunel/sensor/camera");
     MQTTClient_unsubscribe(client, "tunel/sensor/encoder");
     MQTTClient_unsubscribe(client, "tunel/sensor/lidar");
     MQTTClient_unsubscribe(client, "tunel/controle/modo");
-    MQTTClient_unsubscribe(client, "tunel/controle/sp_velocidade");
     MQTTClient_unsubscribe(client, "tunel/controle/direcao");
     MQTTClient_unsubscribe(client, "tunel/sistema/status");
     MQTTClient_unsubscribe(client, "tunel/cmd/iniciar");

@@ -16,7 +16,6 @@
 void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
     Odometria odo; 
     int distancia_anterior = 0;
-    double dt = 0.02; 
 
     boost::asio::io_context io_odo;
     boost::asio::steady_timer timer_odo(io_odo, boost::asio::chrono::milliseconds(20));
@@ -33,16 +32,6 @@ void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
             std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
             dist_atual = sensor.ultima_leitura_encoder;
         }
-
-        // Cálculo derivativo da velocidade real (Delta X / Delta T) em metros
-        double velocidade_medida = (dist_atual - distancia_anterior) / dt;
-
-        // Salva a velocidade calculada para a thread do PID ler
-        /* {
-            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
-            sensor.velocidade_real_medida = velocidade_medida;
-        } */
-        
         // Atualiza a memória de rastreamento para o próximo ciclo de 20ms
         distancia_anterior = dist_atual;
 
@@ -99,6 +88,7 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
 
             // Só registra e dispara a câmera na primeira vez
             if (!alarme_ativo) {
+                int falha_atual = 0;
 
                 {
                     std::lock_guard<std::mutex> lock_tela(mtx_console);
@@ -107,17 +97,19 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
                         std::cout
                             << "[LIDAR] FALHA: BURACO detectado! (Media: "
                             << media << "m)\n";
+                        falha_atual = -1;
                     } else {
                         std::cout
                             << "[LIDAR] FALHA: SALIENCIA detectada! (Media: "
                             << media << "m)\n";
+                        falha_atual = 1;
                     }
                 }
 
                 {
                     std::lock_guard<std::mutex> lock(sensor.mtx_camera);
 
-                    sensor.e_inspecao = true;
+                    sensor.e_inspecao = falha_atual;
                     sensor.o_liga_camera = true;
                 }
 
@@ -142,7 +134,7 @@ void t_reconstrucao_teto(SensorBuffer& sensor) {
                 {
                     std::lock_guard<std::mutex> lock(sensor.mtx_camera);
 
-                    sensor.e_inspecao = false;
+                    sensor.e_inspecao = 0;
                     sensor.o_liga_camera = false;
                 }
 
