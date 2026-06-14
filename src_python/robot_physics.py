@@ -3,6 +3,8 @@ import random
 import math
 import pygame
 
+from mapa_tunel import calcular_altura_teto
+
 # Motor físico do ambiente - Simulação do mundo real
 class RobotPhysicsSimulator:
     def __init__(self, dt=0.02):
@@ -24,72 +26,12 @@ class RobotPhysicsSimulator:
         self.mapa_teto = self._gerar_perfil_teto()
 
     def _gerar_perfil_teto(self):
-        # Cria um vetor de 2500 posições preenchendo com o teto
+        """Gera o vetor discreto do teto."""
         num_pontos = int(self.comprimento_tunel / self.resolucao_mapa)
-        perfil = [self.altura_nominal_teto] * num_pontos
-        
-        # === Bloco 1 de anomalias 0m - 50m ===
-
-        # Saliência retangular (Degrau Seco): do metro 10 ao metro 12
-        idx_ini_sal, idx_fim_sal = int(10 / self.resolucao_mapa), int(12 / self.resolucao_mapa)
-        for i in range(idx_ini_sal, idx_fim_sal):
-            perfil[i] = 9.0
-            
-        # Buraco retangular (Degrau seco): do metro 25 ao metro 28
-        idx_ini_bur, idx_fim_bur = int(25 / self.resolucao_mapa), int(28 / self.resolucao_mapa)
-        for i in range(idx_ini_bur, idx_fim_bur):
-            perfil[i] = 11.2
-
-        # Saliência suave (Curva Senoidal que afunda até 8.5m): do metro 45 ao metro 50
-        idx_ini_sua, idx_fim_sua = int(45 / self.resolucao_mapa), int(50 / self.resolucao_mapa)
-        for i in range(idx_ini_sua, idx_fim_sua):
-            progresso = (i - idx_ini_sua) / (idx_fim_sua - idx_ini_sua)
-            perfil[i] = 10.0 - 1.5 * math.sin(progresso * math.pi)
-
-        # === Bloco 2 de anomalias 50m - 150m ===
-
-        # Saliência triangular: do metro 60 ao metro 63
-        idx_ini_tri_sal, idx_fim_tri_sal = int(60 / self.resolucao_mapa), int(63 / self.resolucao_mapa)
-        meio_tri_sal = (idx_ini_tri_sal + idx_fim_tri_sal) // 2
-
-        for i in range(idx_ini_tri_sal, idx_fim_tri_sal):
-            if i <= meio_tri_sal:
-                # subida da saliência
-                perfil[i] = 10.0 - 1.0 * ((i - idx_ini_tri_sal) / (meio_tri_sal - idx_ini_tri_sal))
-            else:
-                # descida da saliência
-                perfil[i] = 9.0 + 1.0 * ((i - meio_tri_sal) / (idx_fim_tri_sal - meio_tri_sal))
-
-        # Buraco triangular: do metro 84 ao metro 88
-        idx_ini_tri_bur, idx_fim_tri_bur = int(84 / self.resolucao_mapa), int(88 / self.resolucao_mapa)
-        meio_tri_bur = (idx_ini_tri_bur + idx_fim_tri_bur) // 2
-
-        for i in range(idx_ini_tri_bur, idx_fim_tri_bur):
-            if i <= meio_tri_bur:
-                # abertura do buraco
-                perfil[i] = 10.0 + 1.3 * ((i - idx_ini_tri_bur) / (meio_tri_bur - idx_ini_tri_bur))
-            else:
-                # fechamento do buraco
-                perfil[i] = 11.3 - 1.3 * ((i - meio_tri_bur) / (idx_fim_tri_bur - meio_tri_bur))
-
-        # Buraco retangular: do metro 134 ao metro 138
-        idx_ini_bur_ret, idx_fim_bur_ret = int(134 / self.resolucao_mapa), int(138 / self.resolucao_mapa)
-
-        for i in range(idx_ini_bur_ret, idx_fim_bur_ret):
-            perfil[i] = 11.8
-            
-        # === Bloco 3 de anomalias 150m - 250m ===
-
-        # Buraco retangular (Degrau seco): do metro 150 ao metro 155
-        idx_ini_b2, idx_fim_b2 = int(150 / self.resolucao_mapa), int(155 / self.resolucao_mapa)
-        for i in range(idx_ini_b2, idx_fim_b2):
-            perfil[i] = 11.5
-
-        # Adiciona uma zona densa de ondulações rítmicas de concreto entre o metro 200 e o metro 220
-        idx_ini_ond, idx_fim_ond = int(200 / self.resolucao_mapa), int(220 / self.resolucao_mapa)
-        for i in range(idx_ini_ond, idx_fim_ond):
-            perfil[i] = 10.0 - 1.2 * math.sin(i * 0.5)
-
+        perfil = []
+        for i in range(num_pontos):
+            x_metros = i * self.resolucao_mapa
+            perfil.append(calcular_altura_teto(x_metros))
         return perfil
 
     def atualizar_física(self, nova_aceleracao):

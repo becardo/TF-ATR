@@ -3,9 +3,12 @@ import os
 import sys
 import math
 import pygame
+
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QImage, QPixmap, QPainter
+
+from mapa_tunel import calcular_altura_teto
 
 # Desativa drivers de vídeo físicos do Pygame/SDL (Roda em modo "Dummy" na memória)
 os.environ['SDL_VIDEODRIVER'] = 'dummy'
@@ -20,6 +23,7 @@ class PygameWidget(QWidget):
         self.velocidade_ms = 0.0
         self.lidar_m = 10.0
         self.status_inspecao = 0
+        self.frames_flash = 0
         
         # Parâmetros de escala e resolução idênticos ao RobotPhysicsSimulator
         self.resolucao_mapa = 0.1  # 1 ponto a cada 10cm
@@ -46,6 +50,10 @@ class PygameWidget(QWidget):
         self.lidar_m = float(lidar)
         self.status_inspecao = int(status)
 
+    def disparar_flash_camera(self):
+        '''Método chamado pela GUI quando C++ avisa que tirou uma foto.'''
+        self.frames_flash = 15 # Mantém o flash por 15 frames
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.largura = max(self.width(), 100)
@@ -56,53 +64,6 @@ class PygameWidget(QWidget):
         self.renderizar_conteudo_pygame()
         self.converter_pygame_para_pyqt()
         self.update()
-
-    def calcular_altura_teto_em_x(self, x_metros):
-        """Replicador matemático exato do perfil gerado no RobotPhysicsSimulator."""
-        altura_nominal = 10.0
-        
-        # === Bloco 1 de anomalias 0m - 50m ===
-        # Saliência retangular (Degrau Seco): m10 ao m12
-        if 10.0 <= x_metros < 12.0:
-            return 9.0
-        # Buraco retangular (Degrau seco): m25 ao m28
-        if 25.0 <= x_metros < 28.0:
-            return 11.2
-        # Saliência suave (Curva Senoidal): m45 ao m50
-        if 45.0 <= x_metros <= 50.0:
-            progresso = (x_metros - 45.0) / (50.0 - 45.0)
-            return 10.0 - 1.5 * math.sin(progresso * math.pi)
-        
-        # == Bloco 2 de anomalias 50m - 150m ===
-        # Saliência triangular: m60 ao m63
-        if 60.0 <= x_metros <= 63.0:
-            meio = 61.5
-            if x_metros <= meio:
-                return 10.0 - ((x_metros - 60.0) / (meio - 60.0))
-            else:
-                return 9.0 + ((x_metros - meio) / (63.0 - meio))
-        # Buraco triangular: m84 ao m88
-        if 84.0 <= x_metros <= 88.0:
-            meio = 86.0
-            if x_metros <= meio:
-                return 10.0 + 1.3 * ((x_metros - 84.0) / (meio - 84.0))
-            else:
-                return 11.3 - 1.3 * ((x_metros - meio) / (88.0 - meio))
-        # Buraco retangular: m134 ao m144
-        if 134.0 <= x_metros < 138.0:
-            return 11.8
-            
-        # === Bloco 3 de anomalias 150m - 250m ===
-        # Buraco retangular: m150 ao m155
-        if 150.0 <= x_metros < 155.0:
-            return 11.5
-        # Ondulações rítmicas de concreto: m200 ao m220
-        if 200.0 <= x_metros <= 220.0:
-            # Usando a mesma discretização aproximada do índice do vetor
-            indice_simulado = x_metros / self.resolucao_mapa
-            return 10.0 - 1.2 * math.sin(indice_simulado * 0.5)
-            
-        return altura_nominal
 
     def renderizar_conteudo_pygame(self):
         """Desenha a lógica do robô e o teto com anomalias baseado no deslocamento."""
@@ -134,7 +95,7 @@ class PygameWidget(QWidget):
             posicao_global_m = max(0.0, min(posicao_global_m, 250.0))
             
             # Obtém a altura física estrutural do teto (em metros) naquele ponto do mapa
-            altura_m = self.calcular_altura_teto_em_x(posicao_global_m)
+            altura_m = calcular_altura_teto(posicao_global_m)
             
             # Converte a leitura métrica para coordenadas de pixels na tela
             # O teto é desenhado de cima para baixo a partir do chão do simulador
@@ -173,7 +134,7 @@ class PygameWidget(QWidget):
         pygame.draw.rect(self.surface_virtual, (180, 180, 180), (s_x - 6, s_y, 12, 4))
 
         # Calcula o ponto de colisão exato do laser baseado no teto calculado para a posição central do robô
-        altura_teto_atual_m = self.calcular_altura_teto_em_x(self.encoder_m)
+        altura_teto_atual_m = calcular_altura_teto(self.encoder_m)
         laser_fim_y = chao_y - int(altura_teto_atual_m * self.escala_y)
 
         # Desenha feixe dinâmico e o ponto de impacto
@@ -188,10 +149,48 @@ class PygameWidget(QWidget):
         self.surface_virtual.blit(font.render(f"Velocidade: {self.velocidade_ms:.2f} m/s", True, (200, 200, 200)), (15, 32))
         self.surface_virtual.blit(font.render(f"LIDAR (Real): {self.lidar_m:.2f} m", True, COR_LASER), (15, 49))
 
+        font_aviso = pygame.font.SysFont("sans", 14, bold=True)
+        
         if self.status_inspecao == 1:
-            font_aviso = pygame.font.SysFont("sans", 14, bold=True)
-            txt = font_aviso.render("FALHA DE ESTRUTURA DETECTADA NO TETO", True, (255, 50, 50))
-            self.surface_virtual.blit(txt, (self.largura // 2 - txt.get_width() // 2, 15))
+            texto_alerta = "FALHA: SALIÊNCIA DETECTADA NO TETO"
+            cor_alerta = (255, 165, 0) 
+        elif self.status_inspecao == -1:
+            texto_alerta = "FALHA: BURACO DETECTADO NO TETO"
+            cor_alerta = (255, 50, 50) 
+        else: # Se for 0 
+            texto_alerta = "TRECHO RETO"
+            cor_alerta = (50, 255, 50) 
+            
+        # Renderiza o texto com a cor escolhida e centraliza na tela
+        txt = font_aviso.render(texto_alerta, True, cor_alerta)
+        self.surface_virtual.blit(txt, (self.largura // 2 - txt.get_width() // 2, 15))
+    
+        # Renderização do efeito da câmera
+        if self.frames_flash > 0:
+                # Cria uma "lente" transparente do mesmo tamanho da tela
+                lente_flash = pygame.Surface((self.largura, self.altura), pygame.SRCALPHA)
+                
+                # Calcula o Alpha (De 200 até 0) para um Fade Out suave
+                alpha = int((self.frames_flash / 20.0) * 200)
+                lente_flash.fill((255, 255, 255, alpha)) # Preenche com branco transparente
+                
+                # Renderiza a "lente" em cima da superfície virtual
+                self.surface_virtual.blit(lente_flash, (0, 0))
+                
+                # Põe o texto em preto bem nítido no centro
+                font_foto = pygame.font.SysFont("sans", 24, bold=True)
+                txt_foto = font_foto.render("Tirando Foto...", True, (0, 0, 0))
+                
+                pos_centro_x = self.largura // 2 - txt_foto.get_width() // 2
+                pos_centro_y = self.altura // 2 - txt_foto.get_height() // 2
+                
+                # Adiciona uma sombra branca para garantir leitura
+                sombra = font_foto.render("Tirando Foto...", True, (255, 255, 255))
+                self.surface_virtual.blit(sombra, (pos_centro_x + 2, pos_centro_y + 2))
+                self.surface_virtual.blit(txt_foto, (pos_centro_x, pos_centro_y))
+                
+                # Desconta o contador
+                self.frames_flash -= 1
 
     def converter_pygame_para_pyqt(self):
         dados_raw = pygame.image.tostring(self.surface_virtual, 'RGB')
