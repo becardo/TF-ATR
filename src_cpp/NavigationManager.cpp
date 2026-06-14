@@ -16,16 +16,10 @@ void NavigationManager::updateMode(bool cmdAuto, bool cmdMan) {
 
 // Acelerador e Freio com lógica de redução de velocidade (slowDown)
 void NavigationManager::processInputs(double joystickSpeed, bool btnStop, bool slowDown) {
-    // 1. Botão de Emergência: Prioridade máxima, o robô para.
-    if (btnStop) {
-        targetSpeed = 0.0;
-        return;
-    }
-
     // Lógica de Inspeção (slowDown): Se a câmera estiver processando,
-    // a velocidade cai para um valor baixo de 0.2m/s para garantir a qualidade
+    // a velocidade cai para um valor baixo de 0.5m/s para garantir a qualidade
     if (slowDown) {
-        targetSpeed = 0.2; 
+        targetSpeed = 0.5; 
     } 
     else {
         // Operação Normal

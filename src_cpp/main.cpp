@@ -52,8 +52,8 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
             iniciado = nav.sistema_iniciado;
-            c_automatico = nav.c_automatico;
-            c_man = nav.c_man;
+            c_automatico = nav.e_automatico;
+            c_man = !nav.e_automatico;
             c_para = nav.c_para;
             velocidade_joystick = nav.velocidade_joystick;
         }
@@ -78,12 +78,6 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
             nav.inspecao_concluida = true;
         }
 
-        // Fim da inspeção normal (Túnel 2 - Bateu em algo)
-        /* if (posicao_atual > 1 && std::abs(esforco_motor) > 5.0 && std::abs(vel_real) < 0.1) {
-            std::cout << "\n [ALERTA] Barreira detectada! Fim da inspeção por obstáculo.\n";
-            nav.inspecao_concluida = true;
-        } */
-
         // Finalização dos motores, inspeção finalizada
         if (!iniciado || nav.inspecao_concluida) {
             velocidade_joystick = 0.0;
@@ -104,24 +98,14 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
         // Zona crítica: Escrita no Buffer compartilhado
         {
             std::lock_guard<std::mutex> lock(nav.mtx);
-            if (nav.e_automatico) {
-                // Acelera para 1.0 m/s
-                if (nav.c_para || em_inspecao) {
-                    nav.j_sp_velocidade = 0.0;
-                } else {
-                    nav.j_sp_velocidade = 1.0; 
-                }
-            } else {
-                if (nav.c_para || em_inspecao) {
-                    nav.j_sp_velocidade = 0.0;
-                }
-                // Se a posição for 0 e tentar dar ré, corta o motor
-                else if (posicao_atual <= 0 && nav.velocidade_joystick < 0.0) {
-                    nav.j_sp_velocidade = 0.0; 
-                } 
-                else {
-                    nav.j_sp_velocidade = nav.velocidade_joystick;
-                }
+
+            double setpoint_calculado = nav_manager.getTargetSpeed();
+
+            if (posicao_atual <= 0 && setpoint_calculado < 0.0) {
+                nav.j_sp_velocidade = 0.0; 
+            } 
+            else {
+                nav.j_sp_velocidade = setpoint_calculado;
             }
         }
 

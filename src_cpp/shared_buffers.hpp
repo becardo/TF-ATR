@@ -52,7 +52,7 @@ struct SensorBuffer {
     std::condition_variable cv_coletor; // Variável de condição para o Coletor de Dados.
 
     // ----- Sistema de Alarme - Interrupção (Câmera) -----
-    bool e_inspecao = false;            // Flag que indica se o teto tem buracos
+    int e_inspecao = 0;        // Flag que indica se o teto tem falhas: 0 = OK, 1 = Saliência, -1 = Buraco
     std::mutex mtx_camera;              // Cadeado para proteger a alteração da FLAG
 
     bool o_liga_camera = false;         // Variável de Condição para a Câmera
