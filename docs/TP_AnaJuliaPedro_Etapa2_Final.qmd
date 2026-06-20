@@ -1,0 +1,59 @@
+---
+lang: pt
+geometry: "left=3cm, right=2cm, top=3cm, bottom=2cm"
+format: 
+  pdf:
+    number-sections: true
+    colorlinks: true
+    code-line-numbers: true
+---
+
+\begin{titlepage}
+    \centering
+
+    {\large \textbf{Universidade Federal de Minas Gerais (UFMG)} \par}
+    {\large Engenharia de Controle e Automação} \par
+    
+    \vspace{4cm} 
+    
+    {\LARGE \textbf{Sistema Automatizado de Inspeção de Túneis} \par}
+    \vspace{0.6cm} 
+    {\large Trabalho Final - Automação em Tempo Real \par}
+    
+    \vspace{4.5cm} 
+    
+    {\large \textbf{Alunos:} \par}
+    \vspace{0.4cm}
+    {Ana Beatriz Soares Cardoso -- 2022108170 \par}
+    {Julia Pereira Maia Ribeiro -- 2021014864 \par}
+    {Pedro Eduardo Alvino Tapia -- 2021031084 \par}
+    
+    \vfill 
+
+    {\large Belo Horizonte \par}
+    {\large 2026 \par}
+\end{titlepage}
+
+\thispagestyle{empty}
+\newpage              
+
+\vspace*{0cm}         
+\tableofcontents     
+\newpage              
+
+\pagenumbering{arabic} 
+\setcounter{page}{1}   
+
+# Introdução
+descreva o problema de forma sucinta, com uma figura ilustrativa. Não copie a mesma figura usada na especificação do trabalho. Descreva os objetivos do projeto.
+
+# Estruturação: Arquitetura e Comunicação de Dados
+refinamento da proposta entregue na primeira etapa com descrição detalhada das ferramentas de sincronização utilizadas.
+
+# Teste Realizados e Resultados 
+
+# Análise de Capacidade e Escalabilidade do Sistema
+
+# Conclusão e Discussões 
+
+# Apêndice 

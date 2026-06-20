@@ -35,7 +35,7 @@ void t_inspecao_camera(SensorBuffer& sensor) {
         lock.unlock();
         
         auto start = std::chrono::high_resolution_clock::now();
-        processamento_pesado_ia();
+        processamento_pesado_ia(); // CONSUMIDOR 2: lógica da foto tirada
         auto end = std::chrono::high_resolution_clock::now();
 
         std::chrono::duration<double, std::milli> elapsed = end - start;

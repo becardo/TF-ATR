@@ -52,17 +52,20 @@ void t_coletor_dados(SensorBuffer& sensor, NavBuffer& nav) {
         }
         std::unique_lock<std::mutex> lock_fila(sensor.mtx_fila);
 
+        // Dorme até a fila ter alguma medição
         sensor.cv_coletor.wait(lock_fila, [&sensor] { 
             return !sensor.fila_medicoes.empty(); 
         });
         
+        // Enquanto a fila não estiver vazia, esvazie
         while (!sensor.fila_medicoes.empty()) {
             Medicao dado = sensor.fila_medicoes.front();
-            sensor.fila_medicoes.pop();
+            sensor.fila_medicoes.pop(); // CONSUMIDOR 1: esvazia a fila
 
             // --- Análise de Confiança ---
             
-            // Calcula a distância entre o ponto atual e o último ponto
+            // Calcula a distância entre o ponto atual e o último ponto, se for muito grande 
+            // o nível de confiança cai
             double distancia = std::sqrt(std::pow(dado.i_encoder - ultimo_x, 2) + 
                                          std::pow(dado.i_lidar - ultimo_y, 2));
 
@@ -80,7 +83,7 @@ void t_coletor_dados(SensorBuffer& sensor, NavBuffer& nav) {
 
             // Destranca para gravar no HD 
             lock_fila.unlock(); 
-            logger->gravar(dado);
+            logger->gravar(dado); // Grava no CSV
             lock_fila.lock(); 
         } 
     }

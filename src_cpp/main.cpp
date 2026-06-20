@@ -16,6 +16,8 @@
 #include "Coletor.hpp"
 #include "Camera.hpp"
 
+// Implementação controle e comando de navegação, e instâncias das threads
+
 // Thread de comunicação MQTT
 void t_comunicacao_mqtt();
 
@@ -122,7 +124,7 @@ void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
 // o esforço de aceleração necessário
 void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
     PIDController pid(1.0, 0.1, 0.05, 0.08);
-    // Kp=1.0, Ki=1.0, Kd=0.05, dt=0.08
+    // Kp=1.0, Ki=0.1, Kd=0.05, dt=0.08
 
     boost::asio::io_context io_PID_nav;
     boost::asio::steady_timer timer_PID_nav(io_PID_nav, boost::asio::chrono::milliseconds(80));

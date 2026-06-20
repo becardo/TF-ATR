@@ -16,6 +16,12 @@ void NavigationManager::updateMode(bool cmdAuto, bool cmdMan) {
 
 // Acelerador e Freio com lógica de redução de velocidade (slowDown)
 void NavigationManager::processInputs(double joystickSpeed, bool btnStop, bool slowDown) {
+
+    if (btnStop) {
+        targetSpeed = 0.0;
+        return;
+    }
+
     // Lógica de Inspeção (slowDown): Se a câmera estiver processando,
     // a velocidade cai para um valor baixo de 0.5m/s para garantir a qualidade
     if (slowDown) {

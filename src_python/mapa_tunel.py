@@ -32,8 +32,8 @@ def calcular_altura_teto(x_metros):
         else:
             return 11.3 - 1.3 * ((x_metros - meio) / (88.0 - meio))
             
-    # Buraco retangular: m134 ao m138
-    if 134.0 <= x_metros < 138.0:
+    # Buraco retangular: m134 ao m144
+    if 134.0 <= x_metros < 144.0:
         return 11.8
         
     # === Bloco 3 de anomalias (150m - 250m) ===

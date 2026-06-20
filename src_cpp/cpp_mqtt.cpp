@@ -120,7 +120,7 @@ int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient
                     .count(); // Momento em que a medição foi recebida
                 nova_medicao.i_lidar = sensor.ultima_leitura_lidar; // Associa último valor LIDAR conhecido
                 nova_medicao.nivel_confianca = 100;
-                sensor.fila_medicoes.push(nova_medicao); // Insere a medição na fila compartilhada
+                sensor.fila_medicoes.push(nova_medicao); // PRODUTOR 1: Insere a medição na fila compartilhada
             }
 
             // Avisa a thread do coletor que tem uma nova medição para ser gravada
@@ -285,7 +285,14 @@ void t_comunicacao_mqtt(){
     msg_handshake.payloadlen = payload_ready.length();
     msg_handshake.qos = 1; 
     msg_handshake.retained = 1;
-    MQTTClient_publishMessage(client, "tunel/sistema/status", &msg_handshake, NULL);
+
+    MQTTClient_publishMessage(
+        client, 
+        "tunel/sistema/status", 
+        &msg_handshake, 
+        NULL
+    );
+
     std::cout << "[OK] Handshake Concluído! Enviado 'CPP_READY'.\n";
 
     boost::asio::io_context io;
@@ -312,9 +319,7 @@ void t_comunicacao_mqtt(){
 
         {
             std::lock_guard<std::mutex> lock_cam(sensor.mtx_camera);
-            // Converte o estado booleano da inspeção
-            // para um valor inteiro adequado para
-            // transmissão MQTT
+            // Para o painel de alarmes
             controle_status_alarme = sensor.e_inspecao;
         }
 
@@ -325,12 +330,15 @@ void t_comunicacao_mqtt(){
 
         {
             std::lock_guard<std::mutex> lock_cam(sensor.mtx_camera);
+            // Converte o estado booleano da inspeção
+            // para um valor inteiro adequado para
+            // transmissão MQTT
             estado_atual_alarme = sensor.e_inspecao;
         }
 
         // Publicações
 
-        // Publica a ação da câmera
+        // Publica a ação da câmera para lógica de flash
         if (estado_atual_alarme != 0 && estado_anterior_alarme == 0) {
             std::string payload_cam = "CLICK";
             MQTTClient_message msg_camera = MQTTClient_message_initializer;

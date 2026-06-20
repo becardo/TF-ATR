@@ -13,6 +13,7 @@ reset_solicitado = False
 
 # Callback de recebimento 
 # Atualiza as variáveis globais assim que uma ordem chega do C++ ou da GUI
+# Recebe dados da aceleração, status do teto, botão iniciar
 def ao_receber_mensagem(client, userdata, msg):
     global aceleracao_recebida_cpp, status_inspecao, cpp_pronto, sistema_iniciado, reset_solicitado
     
@@ -66,7 +67,7 @@ if __name__ == "__main__":
     print("[OK] Iniciando loop de tempo real (Túnel: 250m)...")
     
     try:
-        # Motor em Tempo Real - 50Hz
+        # Motor em Tempo Real - 50Hz -> 20ms
         while True:
             # Lógica para robô voltar ao início do túnel
             if reset_solicitado and aceleracao_recebida_cpp == 0.0:
