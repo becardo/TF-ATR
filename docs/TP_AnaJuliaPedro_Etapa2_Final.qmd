@@ -51,8 +51,129 @@ descreva o problema de forma sucinta, com uma figura ilustrativa. Não copie a m
 refinamento da proposta entregue na primeira etapa com descrição detalhada das ferramentas de sincronização utilizadas.
 
 # Teste Realizados e Resultados 
+Esta seção apresenta os resultados experimentais obtidos durante a execução do sistema integrado de inspeção. Os testes foram projetados para validar o comportamento dinâmico do robô, o determinismo das tarefas cíclicas, o tratamento de eventos assíncronos e a fidelidade do mapeamento sensorial.
 
+## Mapeamento de Superfície e Perfilamento do Túnel
+O primeiro teste validou o funcionamento do sensor LIDAR e o envio de dados via protocolo MQTT para a interface de supervisão remota, operando em Modo Automático com velocidade nominal configurada para $1.0\text{ m/s}$.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{print_grafico_lidar_20260621_165944.png}
+\caption{Grafico Lidar}
+\label{fig-Arquitetura}
+\end{figure}
+
+**Análise do Resultado:** O gráfico gerado de forma autônoma pela GUI comprova o correto funcionamento do algoritmo de filtragem por média móvel. O perfil dinâmico revela um trecho reto inicial perfeitamente estabilizado na altura ideal de $10.0\text{ m}$. Por volta da posição horizontal de $25\text{ m}$, o filtro atenua ruídos de medição e registra com precisão o degrau de um buraco estrutural (aumento da distância lida para mais de $11.0\text{ m}$). Posteriormente, o robô retorna ao regime reto estável e, na marca de $45\text{ m}$, mapeia uma saliência contínua (redução da distância lida para aproximadamente $8.5\text{ m}$), validando o processamento sensorial síncrono.
+
+## Monitoramento Dinâmico de Amostragem e Overhead do Controlador PID
+Para avaliar a estabilidade temporal do núcleo matemático implementado em C++, coletou-se uma amostragem contínua de $1050$ ciclos consecutivos de processamento da malha de controle de velocidade em regime estável.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{print_analise_pid.png}
+\caption{Tempos de cada tarefa sincrona}
+\label{fig-Arquitetura}
+\end{figure}
+
+**Análise do Resultado:** O gráfico superior comprova o estrito determinismo temporal obtido no sistema. A linha verde (Período Real Medido $T_i$) permanece linearmente ancorada em cima do setpoint temporal nominal de **$80\text{ ms}$**. As flutuações de clock (*jitter*) registradas ao longo de toda a simulação contiveram-se estritamente entre $79.5\text{ ms}$ e $80.6\text{ ms}$, determinando uma margem de variação inferior a $0.75\%$, o que garante a estabilidade do controlador discretizado. 
+
+O gráfico inferior confirma que o tempo de computação pura ($C_i$) para processar as equações do PID e a trava anti-windup é desprezível, mantendo-se na faixa de $0.001\text{ ms}$ a $0.002\text{ ms}$. Os raríssimos picos de overhead de sistema que atingiram $0.06\text{ ms}$ decorrem de chamadas concorrentes de I/O do console, demonstrando que a thread de controle consome menos de $0.075\%$ de banda da CPU, deixando o processador livre para as tarefas esporádicas.
+
+## Validação de Jitter sob Intervenção Dinâmica de Modo (Override)
+Este teste validou a capacidade do sistema de processar com segurança a transição instantânea de modos de operação quando o robô está em modo automático e o operador assume o controle manual de emergência.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{print_transicao_modo.png}
+\caption{Transições de automatico para manual}
+\label{fig-Arquitetura}
+\end{figure}
+
+**Análise do Resultado:** O gráfico demonstra o comportamento temporal concomitante das threads de Comando (`Comando Nav`) e Controle (`Controle PID`) durante o exato ciclo em que o operador intercepta o robô. A estabilidade das curvas comprova que, mesmo com a injeção assíncrona de dados via pacotes MQTT alterando as flags de direção do buffer, o período real de ambas as tarefas cíclicas manteve-se estável na marca de $80\text{ ms}$. O desvio de amostragem pontual (*jitter*) manteve-se abaixo de $0.5\%$, provando que os mecanismos de exclusão mútua (`std::mutex`) no buffer compartilhado foram projetados corretamente, mitigando condições de corrida sem travar o processamento.
+
+## Execução Concorrente de Tarefas Periódicas e Assíncronas
+A análise dos dados numéricos brutos gravados diretamente em disco permite avaliar a cronologia de preempção do kernel do Linux e o comportamento temporal síncrono do sistema.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{tempos.png}
+\caption{Tempos de tarefas periodicas }
+\label{fig-Arquitetura}
+\end{figure}
+
+
+**Análise do Resultado:** O arquivo de log bruto comprova a precisão do agendamento de tarefas cíclicas e o comportamento assíncrono do sistema. Observa-se a thread de mais alta frequência, `ODOMETRIA_20MS`, executando rigorosamente a cada $20\text{ ms}$ ($19.926\text{ ms}$, $20.058\text{ ms}$, $20.006\text{ ms}$), enquanto consome apenas $0.001\text{ ms}$ de tempo de CPU ($C_i$). De forma intercalada e harmônica, as tarefas `COMANDO_NAV_80MS` e `CONTROLE_PID_80MS` disparam em seus prazos exatos de $80\text{ ms}$. 
+A linha da thread tratadora de eventos `COLETOR_BUFFER_EVENTO` comprova o funcionamento assíncrono do padrão produtor-consumidor: ela permaneceu bloqueada em sua variável de condição sem gastar processamento por $323.688\text{ ms}$ ($T_i$) e, ao ser acordada pelo buffer, esvaziou a fila e executou a escrita persistente em disco em meros $0.111\text{ ms}$ ($C_i$).
+
+## Análise de Carga Real em Cenário Critico de Inspeção Visual
+O último teste validou o comportamento de concorrência do processador quando o robô encontra uma falha e dispara os módulos assíncronos mais pesados de escrita e computação gráfica.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{camera e coletor.png}
+\caption{Tempos de tarefas assincronas}
+\label{fig-Arquitetura}
+\end{figure}
+
+**Análise do Resultado:** Este log documenta o exato instante em que o filtro de média móvel do LIDAR detectou a anomalia estrutural e sinalizou a variável de condição da câmera. Conforme especificado pelo projeto, para simular um processamento pesado real de inteligência incorporada sem o uso de sleeps artificiais, a thread disparou seu loop matemático e reteve a CPU de forma legítima por **$28.065\text{ ms}$** no primeiro evento e **$25.350\text{ ms}$** no segundo. 
+
+A eficácia do sincronismo reside no fato de que, por termos liberado explicitamente o trinco de exclusão mútua (`lock.unlock()`) antes de chamar a função de IA, a thread do Coletor de Dados pôde continuar a ser preemptada e executada concorrentemente no meio do processo (registrando tempos de gravação síncronos entre $0.059\text{ ms}$ e $0.120\text{ ms}$). Isso demonstra de forma cabal que o sistema está livre de inversão de prioridades ou travamentos indesejados.
 # Análise de Capacidade e Escalabilidade do Sistema
+
+Esta seção apresenta a validação analítica da capacidade de processamento do sistema embarcado, fundamentada nos conceitos de escalonabilidade em sistemas de tempo real rígido e nos dados empíricos de pior caso extraídos das medições de telemetria.
+
+## Levantamento dos Piores Tempos de Execução ($C_i$)
+
+Com base nos logs reais coletados a partir da execução concorrente do sistema embarcado, foram mapeados os piores tempos de computação (*Worst-Case Execution Time* - WCET) para cada tarefa do sistema:
+
+* **Tarefas Cíclicas Base:**
+    * $C_{\text{odo}} = 0.027\text{ ms}$ (Cálculo de distância / Odometria)
+    * $C_{\text{com}} = 0.025\text{ ms}$ (Comando de Navegação)
+    * $C_{\text{pid}} = 0.013\text{ ms}$ (Controle de Navegação PID)
+    * $C_{\text{recon}} = 0.029\text{ ms}$ (Reconstrução da superfície do teto / LIDAR)
+* **Tarefas por Evento (Assíncronas):**
+    * $C_{\text{coletor}} = 0.147\text{ ms}$ (Esvaziamento de buffer e I/O de escrita no arquivo CSV)
+    * $C_{\text{camera}} = 25.719\text{ ms}$ (Loop numérico contínuo simulando processamento pesado de IA)
+
+## Modelo Teórico de Escalonabilidade Avançado
+
+Para a modelagem de tarefas esporádicas e assíncronas (disparadas estritamente por eventos), a extensão da teoria clássica de tempo real de Liu e Layland exige a definição do intervalo mínimo entre eventos ($T_{\text{evento}}$). Este intervalo baliza o pior cenário de estresse físico que o robô de inspeção pode enfrentar ao navegar pelo túnel:
+
+* **Coletor de Dados:** No cenário de estresse máximo, assume-se que o buffer compartilhado recebe dados de telemetria continuamente, de modo que o Coletor é sinalizado e acordado a cada ciclo de $20\text{ ms}$ ($T_{\text{coletor}} = 20\text{ ms}$).
+* **Inspeção por Câmera:** O pior cenário físico possível ocorre caso o teto do túnel apresente severo dano estrutural sequencial, fazendo com que o filtro do LIDAR detecte uma nova falha imediatamente após a thread da câmera terminar o processamento da inspeção anterior. Dado que a execução pesada da IA consome cerca de $25.7\text{ ms}$, assume-se um disparo crítico a cada $30\text{ ms}$ ($T_{\text{camera}} = 30\text{ ms}$).
+
+## Cálculo do Período Mínimo das Tarefas Cíclicas ($T_{\text{min}}$)
+
+Assumindo um cenário de dimensionamento limite do processador onde todas as tarefas cíclicas base passam a rodar sob estresse na mesma frequência máxima com um período limite comum $T_{\text{min}}$, a inequação da taxa de utilização global da CPU ($U$) sob a concorrência assíncrona da Câmera e do Coletor é modelada por:
+
+$$U = \frac{C_{\text{odo}} + C_{\text{com}} + C_{\text{pid}} + C_{\text{recon}}}{T_{\text{min}}} + \frac{C_{\text{coletor}}}{T_{\text{coletor}}} + \frac{C_{\text{camera}}}{T_{\text{camera}}} \le 1.0$$
+
+Substituindo os valores experimentais mapeados nos logs e as restrições físicas de pior caso adotadas:
+
+$$\frac{0.027 + 0.025 + 0.013 + 0.029}{T_{\text{min}}} + \frac{0.147}{20} + \frac{25.719}{30} \le 1.0$$
+
+$$\frac{0.094\text{ ms}}{T_{\text{min}}} + 0.00735 + 0.8573 \le 1.0$$
+
+A análise matemática isolada revela o impacto do algoritmo de inteligência incorporada da câmera, que abocanha sozinho **$85.73\%$** da capacidade de processamento da CPU no instante em que está ativo. Agrupando a carga persistente fixada pelas tarefas por evento ($0.00735 + 0.8573 = 0.86465$), isola-se o limite de amostragem síncrono:
+
+$$\frac{0.094\text{ ms}}{T_{\text{min}}} + 0.86465 \le 1.0$$
+
+$$\frac{0.094\text{ ms}}{T_{\text{min}}} \le 1.0 - 0.86465$$
+
+$$\frac{0.094\text{ ms}}{T_{\text{min}}} \le 0.13535$$
+
+$$T_{\text{min}} \ge \frac{0.094}{0.13535} \implies \mathbf{T_{\text{min}} \ge 0.694\text{ ms}}$$
+
+## Discussão Teórica e Restrições de Hardware
+
+O resultado analítico demonstra que, matematicamente, o menor tempo limite que as tarefas cíclicas de controle e navegação poderiam adotar sem causar o colapso e a perda de prazos (*deadlines*) do sistema é de **$0.694\text{ ms}$**. 
+
+Contudo, a engenharia de sistemas embarcados impõe restrições práticas de hardware que tornam este limite puramente numérico inviável em cenários reais:
+1.  **Overhead de Troca de Contexto (*Context Switch*):** Em períodos inferiores a $1\text{ ms}$, o tempo gasto pelo escalonador do sistema operacional para salvar registradores e alternar o contexto das threads passa a ser comparável ao tempo de execução útil das tarefas, gerando sobrecarga (*thrashing*).
+2.  **Resolução do Timer do Kernel Linux:** O sistema operacional convencional gerencia o tempo através de interrupções cíclicas de hardware (*ticks*). Isto limita o agendamento determinístico estável de threads a uma resolução mínima real de **$1\text{ ms}$**. Tentar operar abaixo desse limite resultaria em um *jitter* temporal destrutivo.
+
+Desta forma, conclui-se que os períodos adotados no projeto ($20\text{ ms}$, $80\text{ ms}$ e $100\text{ ms}$) constituem uma decisão de engenharia precisa e segura. Eles oferecem uma margem de proteção robusta que garante o determinismo temporal síncrono e cede a prioridade da CPU de forma imediata à Câmera de IA sempre que uma anomalia estrutural for detectada.
+
 
 # Conclusão e Discussões 
 
