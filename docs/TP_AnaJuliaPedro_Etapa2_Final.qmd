@@ -45,22 +45,184 @@ format:
 \setcounter{page}{1}   
 
 # Introdução
-descreva o problema de forma sucinta, com uma figura ilustrativa. Não copie a mesma figura usada na especificação do trabalho. Descreva os objetivos do projeto.
+
+A inspeção estrutural de túneis e galerias subterrâneas desempenha um papel fundamental na manutenção da segurança e da integridade dessas infraestruturas. Entretanto, a execução dessa atividade frequentemente expõe operadores a ambientes insalubres ou potencialmente perigosos. Nesse cenário, os Veículos Terrestres Não Tripulados (UGVs – Unmanned Ground Vehicles) destacam-se como uma alternativa tecnológica capaz de realizar a navegação autônoma e a aquisição de dados de telemetria e imagens de alta precisão, reduzindo a exposição humana a riscos e aumentando a eficiência do processo de inspeção.
+
+No entanto, transformar um robô teleoperado em um sistema capaz de realizar inspeções autônomas traz desafios importantes de software. Durante a operação, o robô recebe continuamente grandes volumes de dados de diferentes sensores, como leituras de LIDAR, encoders e câmeras. Se todas essas informações forem processadas de forma sequencial, o desempenho do sistema pode ser comprometido, afetando o tempo de resposta do controlador e a estabilidade da navegação. Dessa forma, um dos principais desafios deste tipo de projeto é coordenar diferentes tarefas executadas simultaneamente, garantindo que atividades mais complexas, como a detecção de anomalias estruturais, não prejudiquem as funções críticas de controle e movimentação do robô.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.1\textwidth]{../Imagens/Instalacao-de-Tela-metalica-Picada.jpg}
+\caption{Túnel em Juiz de Fora passando por inspeção e reparo pela Pedra Branca Escavações. Fonte: https://pedrabrancaescavacoes.com.br/2024/03/08/tunel-de-2500-metros-em-juiz-de-fora-passa-por-inspecao-e-reparo-pela-pedra-branca-escavacoes/}
+\label{fig-inspecao}
+\end{figure}
+
+O objetivo geral deste projeto é desenvolver e validar uma arquitetura de software concorrente e distribuída para o controle e monitoramento de um robô de inspeção de túneis. Para materializar este objetivo, foram definidos os seguintes objetivos específicos: 
+
+- **Processamento Concorrente e Sincronização**: Organizar as funcionalidades do sistema em módulos independentes, como navegação, processamento de dados dos sensores, inspeção visual e coleta de dados, executados em threads paralelas. Utilizar mecanismos de sincronização (mutexes e variáveis de condição) para garantir o acesso seguro aos dados compartilhados.
+
+- **Desenvolvimento do Controle em Malha Fechada**: Implementar um controlador Proporcional-Integral-Derivativo (PID) em C++, responsável por ajustar a aceleração do robô de modo a manter a velocidade desejada durante a inspeção.
+
+- **Percepção e Detecção de Anomalias**: Desenvolver um algoritmo de filtragem por média móvel para os dados do sensor LIDAR, permitindo identificar irregularidades na estrutura 
+do teto e acionar automaticamente o processo de inspeção visual quando necessário.
+
+- **Interface Gráfica e Registro de Dados**: Desenvolver uma interface gráfica para monitoramento da inspeção em tempo real, apresentando informações de telemetria, gráficos e visualizações do ambiente. Além disso, implementar um mecanismo de registro dos dados coletados para posterior análise e auditoria da missão.
+
+- **Integração entre Controle e Simulação**: Integrar o simulador físico desenvolvido em Python ao sistema de controle implementado em C++, utilizando o protocolo MQTT para a troca de informações entre os diferentes módulos da aplicação.
+
+O desempenho e a confiabilidade do sistema dependem diretamente da forma como seus componentes interagem entre si. Dessa forma, a próxima seção apresenta a arquitetura desenvolvida e os mecanismos de comunicação utilizados para integrar os diferentes módulos da aplicação.
 
 # Estruturação: Arquitetura e Comunicação de Dados
-refinamento da proposta entregue na primeira etapa com descrição detalhada das ferramentas de sincronização utilizadas.
+
+A arquitetura do sistema foi concebida com base no princípio de separação estrita de domínios, adotando uma abordagem orientada a microsserviços. Dessa forma, a simulação física e a interface reativa são desacopladas do núcleo de controle embarcado concorrente, sendo ambos integrados por meio do protocolo de mensageria assíncrona MQTT, que atua como barramento de comunicação do Sistema Ciber-Físico. Essa abordagem permite conciliar requisitos de determinismo temporal rigoroso (Hard Real-Time) nas tarefas críticas de controle com elevada flexibilidade para aquisição, processamento e distribuição de dados de telemetria.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.1\textwidth]{../Imagens/Arquitetura2.jpg}
+\caption{Arquitetura - Sistema Distribuído Ciber-Físico.}
+\label{fig-Arquitetura2}
+\end{figure}
+
+O sistema é dividido em dois processos principais que executam em paralelo em linguagens distintas: o Back-End em C++ (Lógica e Controle) e o Front-End em Python (Física e GUI). A comunicação entre os processos é realizada via Broker MQTT em um modelo Publish/Subscribe, permitindo tolerância a falhas e isolamento total entre a cadência do renderizador gráfico e o tempo de resposta do motor.
+
+## Back-End - Controle Embarcado Concorrente (C++)
+
+Responsável pelo controle embarcado concorrente, filtros de percepção e persistência de dados, operando sob um rigoroso modelo de paralelismo de memória compartilhada. 
+
+O núcleo do sistema foi desenvolvido em C++11, utilizando as APIs: 
+
+* `std::thread`, `std::mutex` e `std::condition_variable` para concorrência e sincronização de zonas críticas.
+* `Boost.Asio`, para timer estritos de alta presição, sem *drif* temporal, para tarefas cíclicas. 
+
+### Modularização e Desaclopamento de Domínio no Back-End
+
+Para reduzir a complexidade inerente a sistemas fortemente paralelos e evitar a criação de um código monolítico de difícil manutenção, o Back-End em C++ foi desenvolvido seguindo o princípio de Separação de Preocupações (Separation of Concerns). A arquitetura define uma separação clara entre o Contexto de Execução, responsável pelas threads e tarefas periódicas, e a Lógica de Domínio, responsável pelos algoritmos de controle e percepção.
+
+As rotinas de cálculo e as regras de negócio foram encapsuladas em classes independentes, organizadas em arquivos _.cpp_ e _.hpp_, sendo elas:
+
+* `PIDController`: Isola a malha de controle, armazenando o estado do erro integral e derivativo.
+* `Odometria`: Encapsula a lógica de detecção de borda de subida do encoder.
+* `LidarFilter`: Retém o buffer circular para o cálculo da média móvel.
+* `NavigationManager`: Concentra a máquina de estados que decide a velocidade alvo baseada nos inputs de emergência ou inspeção.
+* `Camera`: Executa uma lógica de simulação pesada que representa a ação de captura do ambiente.
+* `Coletor`: Realiza a coleta dos dados de leitura da inspeção realizada.
+
+A grande vantagem arquitetural dessa modularização é o Desacoplamento. As classes matemáticas desconhecem completamente a existência da rede MQTT, dos temporizadores do Boost.Asio ou da concorrência do sistema operativo. Elas funcionam como "caixas-pretas" determinísticas: recebem parâmetros, processam a física e devolvem resultados.
+
+As funções orquestradoras (as _threads_ com prefixo `t_`) atuam puramente como injetoras de dependência de gerenciadoras de fluxo. Para atender aos requisitos do sistema embarcado, essas _threads_ foram divididas em dois paradigmas de escalonamento e distribuídas modularmente pelo código. Quatro delas operam de forma estritamente cíclica (_Timer-Triggered_): `t_comando_navecao` e `t_controle_navegacao`, alocadas no arquivo `main.cpp`; e `t_calculo_distancia` e `t_reconstrucao_teto`, alocadas no arquivo `tasks,cpp`. Isso garante o determinismo temporal da malha de controle e da amostragem dos sensores. Em contrapartida, as tarefas `t_inspecao_camera` (encapsulada de forma isolada no arquivo `Camera.cpp`) e `t_coletor_dado` (encapsulada no arquivo `Coletor.cpp`) operam de forma aperiódica e reativa, sendo suspensas e acordadas exclusivamente pelas variáveis de condição `cv_camera` e `cv_coletor`. Estas últimas permanecem adormecidas para poupar processamento e só despertam sob demanda.
+
+A responsabilidade dessas threads se restringe a trancar as zonas críticas de memória (`std::lock_guard`), extrair os dados dos buffers, acionar os métodos das classes de domínio e, finalmente, devolver os resultados calculados para a rede. A seguir, será detalhado mais profundamente a atuação de cada _Thread_ no sistema.
+
+#### Threads Cíclicas de Tempo Real 
+##### Thread de Comando de Navegação — 80 ms
+
+Responsável por adquirir as diretrizes de movimento vindas da rede MQTT e gerenciar os estados de operação. Avalia periodicamente se o robô está em modo **Manual** ou **Automático** e verifica a flag de segurança `e_inspecao` (protegida pelo `mtx_camera`). Caso o alarme seja acionado, dita o estado de **Slowdown**. Após o processamento no `NavigationManager`, a thread adentra a zona crítica do NavBuffer (`std::lock_guard`) para atualizar o setpoint de velocidade de forma atômica.
+
+##### Thread de Controle de Navegação (PID) — 80 ms
+
+A malha fechada de controle. A cada ciclo, adquire bloqueios hierárquicos para ler o setpoint atual no _NavBuffer_ e a velocidade real medida no _SensorBuffer_. O algoritmo `PIDController` calcula o esforço compensatório com base em todo o seu histórico integral e derivativo. A saída `o_aceleracao` é escrita de volta no buffer para transmissão imediata via MQTT.
+
+##### Thread de Cálculo de Distância (Odometria) — 20 ms
+
+Atua como Produtora de dados telemétricos de alta frequência. Lê o pulso do encoder virtual e deriva a velocidade real instantânea para o PID. Devido ao seu deadline restrito, ela empacota os dados de distância e posição do LIDAR na estrutura `Medicao` presente no arquivo `shared_buffers.hpp` e adentra a zona crítica da fila de medições apenas pelo tempo exato de realizar um `.push()`. Em seguida, notifica a variável `cv_coletor.notify_one()`, informando a thread de gravação sem bloquear o próprio ciclo.
+
+##### Thread de Reconstrução do Teto (LIDAR) — 100 ms
+
+Responsável pela percepção ambiental. Instancia o `LidarFilter` para aplicar uma média móvel circular, amortecendo o ruído estocástico inserido pela planta física. Quando a variação estrutural do teto ultrapassa a margem de tolerância, esta thread altera as variáveis de estado de inspeção e aciona o gatilho reativo visualizando a falha, disparando `cv_camera.notify_one()`.
+
+#### Threads Reativas (Aperiódicas)
+##### Thread de Inspeção por Câmera 
+
+Modelada para absorver processamento computacional intensivo de tempo real. Permanece adormecida (*cv_camera.wait()*), consumindo 0% de CPU. Ao ser notificada pelo LIDAR, a thread acorda, destranca explicitamente o mutex (_lock.unlock()_) e simula a carga de IA. Ao término, retoma a trava apenas para resetar as flags e liberar o robô.
+
+##### Thread Coletora de Dados (CSV)
+
+Implementa o Consumidor no padrão Produtor-Consumidor. Adormecida com *cv_coletor.wait()*, ela desperta apenas quando há pacotes novos. Ao acordar, executa *while (!fila_medicoes.empty())*, retirando todos os dados pendentes de uma só vez. Durante o processamento, calcula o dinâmico Nível de Confiança de cada medição (reduzindo a porcentagem com base na distância euclidiana entre a leitura atual e a anterior). O destrancamento da fila durante a gravação no disco (*logger.gravar()*) garante que a thread de `Odometria (20 ms)` nunca seja impedida de injetar novos pacotes Adicionalmente, possui lógica para identificar o início de uma nova inspeção e recriar automaticamente o arquivo de auditoria *telemetria_inspecao.csv*.
+
+## O Núcleo de Sincronização: *shared_buffer.hpp*
+
+A execução concorrente das threads do Back-End é organizada a partir do arquivo `shared_buffers.hpp`, responsável por concentrar as estruturas compartilhadas entre os diferentes módulos do sistema. Para atender aos requisitos de tempo real e reduzir disputas desnecessárias por recursos compartilhados, optou-se por não utilizar um único mutex global. Em vez disso, a memória compartilhada foi dividida em estruturas específicas, cada uma protegida por seus próprios mecanismos de sincronização.
+
+A troca de informações entre as threads ocorre principalmente por meio de duas estruturas de dados e um mecanismo dedicado à sincronização das saídas no terminal.
+
+**NavBuffer**
+
+O `NavBuffer` faz a ligação entre a camada de decisão (comandos recebidos via MQTT ou lógica autônoma) e a camada de controle dos motores. As variáveis de movimento, como `j_sp_velocidade` e `o_aceleracao`, são protegidas por um mutex próprio (`mtx`), garantindo que a thread do controlador PID possa acessar os setpoints de forma consistente durante seus ciclos de execução.
+
+**SensorBuffer** 
+
+O `SensorBuffer` concentra os dados de telemetria e os sinais de evento gerados pelos sensores. Sua estrutura é dividida em três grupos principais:
+
+* Uma fila Produtor-Consumidor baseada em `std::queue<Medicao>`, protegida por `mtx_fila` e sincronizada pela variável de condição `cv_coletor`. Essa fila desacopla a coleta de dados do processo de gravação em disco.
+* Um conjunto de flags de evento, como `e_inspecao` e `o_liga_camera`, juntamente com a variável de condição `cv_camera`, protegidos por `mtx_camera`. Esses elementos permitem sinalizar a necessidade de ativação da câmera a partir das leituras do LIDAR.
+* Variáveis de acesso frequente, como `velocidade_real_medida` e `ultima_leitura_lidar`, protegidas por `mtx_leituras`. Dessa forma, as threads de controle podem acessar as informações mais recentes sem depender da fila de medições.
+
+**Proteção de saída no Terminal**
+
+O mutex `mtx_console` é utilizado exclusivamente para controlar o acesso ao `std::cout`. Como várias threads registram mensagens simultaneamente, essa proteção evita que trechos de texto sejam impressos de forma intercalada, preservando a legibilidade dos logs.
+
+Ao reunir essas estruturas em um único arquivo de cabeçalho, o `shared_buffers.hpp` passa a concentrar o estado compartilhado do robô em um único ponto de acesso. Isso simplifica a comunicação entre os módulos e permite que as classes responsáveis pela lógica de domínio permaneçam desacopladas dos detalhes de sincronização e concorrência.
+
+## Front-End - Motor Físico e Interface Reativa
+
+Responsável pelo motor físico temporal da planta, geração de dados estocásticos de sensores e interação com o operador remoto em uma interface não-bloqueante. O processo Front-End foi implementado em Python unindo três bibliotecas de alto desempenho (PyQt6, Pygame e Matplotlib), assumindo as seguintes responsabilidades:
+
+- **Planta Física (Pygame)**: Atua como o motor cinemático real do sistema. Opera em um loop temporal estrito de 50 Hz, integrando o esforço de aceleração recebido do C++ para calcular a odometria e injetando ruído gaussiano nas leituras do LIDAR para testar a robustez dos filtros do controlador.
+
+- **Interface Gráfica e Sinais (PyQt6)**: A Estação de Controle utiliza o sistema nativo de "Sinais e Slots" (pyqtSignal) para se manter 100% responsiva. O PyQt6 recebe a telemetria via rede em background e atualiza os painéis visuais e os gráficos dinâmicos do Matplotlib sem jamais congelar a operação (bloqueio de thread principal).
+
+## Integração Ciber-Física via Protocolo MQTT
+
+Para viabilizar a arquitetura distribuída e garantir o isolamento absoluto entre a interface gráfica e o controlador de tempo real, o projeto adotou o protocolo de mensageria MQTT (Message Queuing Telemetry Transport) atuando sob o modelo Publish/Subscribe. O fluxo de dados foi bidirecionalmente orquestrado entre as duas linguagens do sistema:
+
+### Taxomania de Tópicos (Roteamento de Dados)
+
+Para estruturar o tráfego de rede, permitir a escalabilidade e evitar colisões de dados, o sistema adota uma árvore de tópicos hierárquica iniciada pelo prefixo global `tunel/`, dividida em quatro domínios semânticos principais:
+
+- **Domínio de Comando e Controle** (`tunel/controle/#` e `tunel/cmd/#`): Transporta as diretrizes de operação e a saída do controlador. Exemplos incluem `tunel/controle/modo`, `tunel/controle/direcao`, `tunel/cmd/iniciar` e o crítico `tunel/cmd/aceleracao` (que carrega o esforço calculado pelo PID).
+- **Domínio de Sensores** (`tunel/sensor/#`): Trafega a telemetria gerada pelo motor físico temporal. Contém tópicos de alta frequência como `tunel/sensor/encoder`, `tunel/sensor/lidar` e `tunel/sensor/velocidade`.
+- **Domínio de Sistema e Status** (`tunel/sistema/#` e `tunel/status/#`): Tópicos para sincronização de estados globais entre as linguagens, como `tunel/sistema/status`, `tunel/sensor/camera` e `tunel/status/inspecao`, utilizados para coordenar a ativação dos alertas na interface do operador.
+
+### Qualidade de Serviço (QoS 1)
+
+A confiabilidade da comunicação ciber-física foi assegurada pela configuração estrita da Qualidade de Serviço no nível QoS 1 (At Least Once - "Pelo menos uma vez"), conforme documentado na inicialização do cliente C++.
+
+Em sistemas robóticos, a perda de pacotes telemétricos (QoS 0) pode desestabilizar a malha do PID, enquanto o handshake de quatro vias do QoS 2 introduziria latência excessiva para os prazos de 50 ms. O QoS 1 garante, mediante recibos de confirmação (PUBACK), a entrega absoluta da mensagem. O risco inerente ao QoS 1 (a entrega duplicada de mensagens devido a flutuações da rede) foi mitigado matematicamente no C++ através do princípio da Idempotência. As threads reagem aos tópicos reescrevendo estados absolutos nos buffers (ex: trancar a posição atual do encoder), de forma que o reprocessamento de uma leitura duplicada não corrompe a integração da física nem a estabilidade do robô.
+
+### O Fluxo Bidirecional Orquestrado 
+#### Cliente Back-End Embarcado (C++)
+
+No núcleo de controle, a comunicação MQTT é realizada pela tarefa `t_comunicacao_mqtt`, implementada no arquivo `cpp_mqtt.cpp`. Essa tarefa é responsável por manter a conexão com o broker, receber dados dos sensores simulados e publicar os comandos gerados pelo controlador. A tarefa permanece inscrita em tópicos como `tunel/sensor/encoder`, `tunel/sensor/lidar` e `tunel/controle/modo`, processando as mensagens recebidas de forma assíncrona.
+
+**Recepção de dados dos sensores**
+
+Sempre que o simulador publica novas medições, o callback associado ao tópico é executado. Os dados recebidos são convertidos para os tipos utilizados pelo sistema e, em seguida, armazenados nas estruturas compartilhadas protegidas por mecanismos de sincronização. O uso de blocos `try-catch` permite tratar possíveis erros de conversão ou mensagens inválidas sem comprometer a execução da aplicação. Após a validação dos dados, as informações são disponibilizadas para as demais tarefas do sistema, incluindo os módulos de odometria, navegação e controle PID.
+
+**Publicação dos comandos de controle**
+
+Além de receber dados, a tarefa também realiza a publicação periódica dos comandos gerados pelo controlador. Em intervalos regulares de 50ms, o valor mais recente de aceleração é obtido a partir das estruturas compartilhadas e enviado ao tópico `tunel/cmd/aceleracao`. Esse mecanismo fecha o ciclo de comunicação entre o controlador e a planta simulada. Enquanto o simulador envia medições para o Back-End, o controlador processa essas informações e devolve os comandos necessários para a atualização do modelo físico, mantendo a operação sincronizada entre os dois ambientes.
+
+#### Cliente Front-End (Python/Simulação e GUI)
+
+No Front-End, a biblioteca Paho MQTT é utilizada para simular a resposta da planta e fornecer os dados necessários para a interface gráfica. O cliente MQTT inscreve-se em tópicos como `tunel/cmd/aceleracao` e `tunel/status/inspecao`, recebendo as informações geradas pelo sistema de controle implementado em C++.
+
+Para evitar que as operações de comunicação interfiram na atualização da interface desenvolvida com PyQt6 e Pygame, o processamento da rede é executado em uma thread separada através do método `cliente_mqtt.loop_start()`. Dessa forma, o gerenciamento da conexão MQTT e a execução dos callbacks ocorrem em segundo plano, sem bloquear a interface gráfica.
+
+Com essa abordagem, a recepção e o envio de mensagens acontecem de forma assíncrona, permitindo que a simulação, a renderização gráfica e a comunicação MQTT operem simultaneamente sem comprometer a responsividade da aplicação.
 
 # Teste Realizados e Resultados 
+
 Esta seção apresenta os resultados experimentais obtidos durante a execução do sistema integrado de inspeção. Os testes foram projetados para validar o comportamento dinâmico do robô, o determinismo das tarefas cíclicas, o tratamento de eventos assíncronos e a fidelidade do mapeamento sensorial.
 
 ## Mapeamento de Superfície e Perfilamento do Túnel
+
 O primeiro teste validou o funcionamento do sensor LIDAR e o envio de dados via protocolo MQTT para a interface de supervisão remota, operando em Modo Automático com velocidade nominal configurada para $1.0\text{ m/s}$.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\textwidth]{print_grafico_lidar_20260621_165944.png}
-\caption{Grafico Lidar}
-\label{fig-Arquitetura}
+\includegraphics[width=0.8\textwidth]{../docs/print_grafico_lidar_20260621_165944.png}
+\caption{Grafico Lidar.}
+\label{fig-lidar}
 \end{figure}
 
 **Análise do Resultado:** O gráfico gerado de forma autônoma pela GUI comprova o correto funcionamento do algoritmo de filtragem por média móvel. O perfil dinâmico revela um trecho reto inicial perfeitamente estabilizado na altura ideal de $10.0\text{ m}$. Por volta da posição horizontal de $25\text{ m}$, o filtro atenua ruídos de medição e registra com precisão o degrau de um buraco estrutural (aumento da distância lida para mais de $11.0\text{ m}$). Posteriormente, o robô retorna ao regime reto estável e, na marca de $45\text{ m}$, mapeia uma saliência contínua (redução da distância lida para aproximadamente $8.5\text{ m}$), validando o processamento sensorial síncrono.
@@ -70,9 +232,9 @@ Para avaliar a estabilidade temporal do núcleo matemático implementado em C++,
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\textwidth]{print_analise_pid.png}
-\caption{Tempos de cada tarefa sincrona}
-\label{fig-Arquitetura}
+\includegraphics[width=0.8\textwidth]{../docs/print_analise_pid.png}
+\caption{Tempos de cada tarefa sincrona.}
+\label{fig-tarefas}
 \end{figure}
 
 **Análise do Resultado:** O gráfico superior comprova o estrito determinismo temporal obtido no sistema. A linha verde (Período Real Medido $T_i$) permanece linearmente ancorada em cima do setpoint temporal nominal de **$80\text{ ms}$**. As flutuações de clock (*jitter*) registradas ao longo de toda a simulação contiveram-se estritamente entre $79.5\text{ ms}$ e $80.6\text{ ms}$, determinando uma margem de variação inferior a $0.75\%$, o que garante a estabilidade do controlador discretizado. 
@@ -84,9 +246,9 @@ Este teste validou a capacidade do sistema de processar com segurança a transi�
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\textwidth]{print_transicao_modo.png}
-\caption{Transições de automatico para manual}
-\label{fig-Arquitetura}
+\includegraphics[width=0.8\textwidth]{../docs/print_transicao_modo.png}
+\caption{Transições de automatico para manual.}
+\label{fig-transicoes}
 \end{figure}
 
 **Análise do Resultado:** O gráfico demonstra o comportamento temporal concomitante das threads de Comando (`Comando Nav`) e Controle (`Controle PID`) durante o exato ciclo em que o operador intercepta o robô. A estabilidade das curvas comprova que, mesmo com a injeção assíncrona de dados via pacotes MQTT alterando as flags de direção do buffer, o período real de ambas as tarefas cíclicas manteve-se estável na marca de $80\text{ ms}$. O desvio de amostragem pontual (*jitter*) manteve-se abaixo de $0.5\%$, provando que os mecanismos de exclusão mútua (`std::mutex`) no buffer compartilhado foram projetados corretamente, mitigando condições de corrida sem travar o processamento.
@@ -96,9 +258,9 @@ A análise dos dados numéricos brutos gravados diretamente em disco permite ava
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\textwidth]{tempos.png}
-\caption{Tempos de tarefas periodicas }
-\label{fig-Arquitetura}
+\includegraphics[width=0.8\textwidth]{../docs/tempos.png}
+\caption{Tempos de tarefas periodicas.}
+\label{fig-priodicas}
 \end{figure}
 
 
@@ -110,9 +272,9 @@ O último teste validou o comportamento de concorrência do processador quando o
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\textwidth]{camera e coletor.png}
-\caption{Tempos de tarefas assincronas}
-\label{fig-Arquitetura}
+\includegraphics[width=0.8\textwidth]{../docs/camera e coletor.png}
+\caption{Tempos de tarefas assincronas.}
+\label{fig-assincronas}
 \end{figure}
 
 **Análise do Resultado:** Este log documenta o exato instante em que o filtro de média móvel do LIDAR detectou a anomalia estrutural e sinalizou a variável de condição da câmera. Conforme especificado pelo projeto, para simular um processamento pesado real de inteligência incorporada sem o uso de sleeps artificiais, a thread disparou seu loop matemático e reteve a CPU de forma legítima por **$28.065\text{ ms}$** no primeiro evento e **$25.350\text{ ms}$** no segundo. 
@@ -174,7 +336,2439 @@ Contudo, a engenharia de sistemas embarcados impõe restrições práticas de ha
 
 Desta forma, conclui-se que os períodos adotados no projeto ($20\text{ ms}$, $80\text{ ms}$ e $100\text{ ms}$) constituem uma decisão de engenharia precisa e segura. Eles oferecem uma margem de proteção robusta que garante o determinismo temporal síncrono e cede a prioridade da CPU de forma imediata à Câmera de IA sempre que uma anomalia estrutural for detectada.
 
-
 # Conclusão e Discussões 
 
+
+
+# Link para o vídeo de demosntração
+
+Abaixo, segue o link para o vídeo de demonstração rápida do funcionamento do projeto Inspeção de Túneis.
+
+link: https://youtu.be/giIym-B7J-w?is=SEPqwjJYW0BiHkrg
+
 # Apêndice 
+
+## *main.cpp*
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <boost/asio.hpp>
+#include <fstream>
+#include <iomanip>
+#include <string>
+#include <functional>
+#include <condition_variable>
+
+// Inclusão dos Buffers e Blocos de Execução
+#include "tasks.hpp"
+#include "shared_buffers.hpp"
+#include "NavigationManager.hpp"
+#include "PIDController.hpp"
+#include "Coletor.hpp"
+#include "Camera.hpp"
+
+// Implementação controle e comando de navegação, e instâncias das threads
+
+// Thread de comunicação MQTT
+void t_comunicacao_mqtt();
+
+NavBuffer nav;
+SensorBuffer sensor;
+
+// Thread responsável por ler os comandos do usuário (joystick/botoes) e definir o Setpoint
+void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
+    NavigationManager nav_manager; 
+
+    boost::asio::io_context io_com_nav;
+    boost::asio::steady_timer timer_com_nav(io_com_nav, boost::asio::chrono::milliseconds(80)); 
+
+    std::function<void(const boost::system::error_code&)> loop_comando;
+
+    loop_comando = ([&](const boost::system::error_code& erro){
+        if(erro) return;
+
+        // Leitura do status da inspeção (câmera)
+        bool em_inspecao = false;
+        {
+            // Bloqueia o mutex da câmera apenas para ler a flag de alarme
+            std::lock_guard<std::mutex> lock(sensor.mtx_camera);
+            em_inspecao = sensor.e_inspecao;
+        }
+
+        // Mocks de entrada, vindos do MQTT
+        bool iniciado = false;
+        bool c_automatico = false; 
+        bool c_man = false;         
+        bool c_para = false;       
+        double velocidade_joystick = 0.0; 
+
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            iniciado = nav.sistema_iniciado;
+            c_automatico = nav.e_automatico;
+            c_man = !nav.e_automatico;
+            c_para = nav.c_para;
+            velocidade_joystick = nav.velocidade_joystick;
+        }
+
+        // Intercepçao: enquando não for iniciada, robô não se mexe
+        if (!iniciado) {
+            velocidade_joystick = 0.0;
+            c_para = true; // Mantém o freio puxado
+        }
+
+        // Leitura da Telemetria 
+        float teto_atual = 0.0;
+
+        {
+            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+            teto_atual = sensor.ultima_leitura_lidar;
+        }
+
+        // Fim da inspeção normal (Túnel 1 - final aberto)
+        if (teto_atual > 15.0 && iniciado && !nav.inspecao_concluida) {
+            std::cout << "\n [MISSÃO] Fim do túnel detectado.\n";
+            nav.inspecao_concluida = true;
+        }
+
+        // Finalização dos motores, inspeção finalizada
+        if (!iniciado || nav.inspecao_concluida) {
+            velocidade_joystick = 0.0;
+            c_para = true; 
+        }
+
+        // Passa para o NavigationManager processar
+        // Atualiza o modo (Manual/Automática) e calcula a nova velocidade
+        nav_manager.updateMode(c_automatico, c_man);
+        nav_manager.processInputs(velocidade_joystick, c_para, em_inspecao);
+
+        int posicao_atual = 0;
+        {
+            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+            posicao_atual = sensor.ultima_leitura_encoder;
+        }
+
+        // Zona crítica: Escrita no Buffer compartilhado
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+
+            double setpoint_calculado = nav_manager.getTargetSpeed();
+
+            if (posicao_atual <= 0 && setpoint_calculado < 0.0) {
+                nav.j_sp_velocidade = 0.0; 
+            } 
+            else {
+                nav.j_sp_velocidade = setpoint_calculado;
+            }
+        }
+
+        timer_com_nav.expires_at(timer_com_nav.expiry() + boost::asio::chrono::milliseconds(80));
+        timer_com_nav.async_wait(loop_comando);
+    });
+
+    timer_com_nav.async_wait(loop_comando);
+    io_com_nav.run();
+}
+
+// Thread responsável pelo controle PID em malha fechada
+// Lê o setpoint desejado, comparar com a velocidade real e calcula
+// o esforço de aceleração necessário
+void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor) {
+    PIDController pid(1.0, 0.1, 0.05, 0.08);
+    // Kp=1.0, Ki=1.0, Kd=0.05, dt=0.08
+
+    boost::asio::io_context io_PID_nav;
+    boost::asio::steady_timer timer_PID_nav(io_PID_nav, boost::asio::chrono::milliseconds(80));
+
+    std::function<void(const boost::system::error_code&)> loop_PID;
+
+    loop_PID = ([&](const boost::system::error_code& erro){
+        if(erro) return;
+
+        // leitura do setpoint definido por t_comando_navegacao
+        float setpoint_atual = 0.0;
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            setpoint_atual = nav.j_sp_velocidade;
+        }
+
+        // Leitura da física real
+        double velocidade_atual_robo = 0.0;
+        int posicao_atual_encoder = 0;
+        {
+            // Tranca a porta para ler a telemetria atualizada pelo MQTT com segurança
+            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+            velocidade_atual_robo = sensor.velocidade_real_medida;
+            posicao_atual_encoder = sensor.ultima_leitura_encoder;
+        }
+
+        // Cálculo do PID
+        if (setpoint_atual == 0.0) {
+            pid.reset();
+        }
+
+        double saida_aceleracao = pid.compute(static_cast<double>(setpoint_atual), velocidade_atual_robo);
+
+        // Trava de segurança para fim de curso do túnel estendido de 250 metros
+        if (posicao_atual_encoder >= 250) {
+            saida_aceleracao = 0.0;
+            pid.reset(); // Zera a memória integral do PID
+        }
+
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[PID] Setpoint: " << setpoint_atual << " m/s | Aceleracao calculada: " 
+              << saida_aceleracao << " m/s²\n";
+        }
+        
+        // Escrita da aceleração no Buffer para a Thread MQTT enviar ao Python
+        {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            nav.o_aceleracao = saida_aceleracao;
+        }
+
+        timer_PID_nav.expires_at(timer_PID_nav.expiry() + boost::asio::chrono::milliseconds(80));
+        timer_PID_nav.async_wait(loop_PID);
+    });
+
+    timer_PID_nav.async_wait(loop_PID);
+    io_PID_nav.run();
+}
+
+
+
+int main() {
+    std::cout << "Iniciando Sistema de Inspecao do Tunel (Módulos Integrados via MQTT)...\n";
+
+    // Instanciação assíncrona paralela das 7 threads de processamento do sistema
+    std::thread th_comando(t_comando_navegacao, std::ref(nav), std::ref(sensor));
+    std::thread th_controle(t_controle_navegacao, std::ref(nav), std::ref(sensor));
+    std::thread th_distancia(t_calculo_distancia, std::ref(nav), std::ref(sensor));
+    std::thread th_teto(t_reconstrucao_teto, std::ref(sensor));
+    std::thread th_camera(t_inspecao_camera, std::ref(sensor));
+    std::thread th_coletor(t_coletor_dados, std::ref(sensor), std::ref(nav));
+    std::thread thread_mqtt(t_comunicacao_mqtt); 
+
+    // Sincronismo estruturado de encerramento determinístico
+    th_comando.join();
+    th_controle.join();
+    th_distancia.join();
+    th_teto.join();
+    th_camera.join();
+    th_coletor.join();
+    
+    thread_mqtt.join(); 
+
+    return 0;
+}
+```
+
+## *shared_buffers.hpp*
+
+```cpp
+#ifndef SHARED_BUFFERS_HPP
+#define SHARED_BUFFERS_HPP
+
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+
+/* Define os Buffers, Mutexes, Filas e Variáveis de Condição que permitem
+a comunicação segura entre as múltiplas threads do sistema. Garante a
+exclusão mútua nas zonas críticas, evitando condições de corrida.
+*/
+
+inline std::mutex mtx_console;
+
+// Buffer de Comando e Navegação
+// Armazena os dados de troca entre os comandos do usuário e o controle PID
+// do robo. Protegida por MUTEX para evitar Condição de Corrida.
+struct NavBuffer {
+    double j_sp_velocidade = 0.0;       // Velocidade alvo solicitada (m/s)
+    double o_aceleracao = 0.0;          // Esforço do controle calculado pelo PID
+    bool e_automatico = false;          // Estado de operação (Manual ou Auto)
+
+    bool sistema_iniciado = false;      // O robô inicia parado
+    bool c_automatico = false;          // Comando de modo Automático 
+    bool c_man = false;                 // Comando de modo Manual 
+    bool c_para = false;                // Comando de parada de emergência
+    double velocidade_joystick = 0.0;   // Velocidade enviada pelos botões esq/dir
+
+    bool inspecao_concluida = false;    // Flag de Inspeção Concluída
+
+    std::mutex mtx;                     // O cadeado do PID
+};
+
+// Armazena uma leitura única de sensor. Empacota os dados antes de enviar para 
+// a fila (queue).
+struct Medicao {
+    long long timestamp = 0;            // Tempo da leitura (ms)
+    int i_encoder = 0;                  // Odometria: Posição atual no eixo X
+    float i_lidar = 0.0;                // LIDAR: Distância até o teto
+    double nivel_confianca = 0;         // Qualidade da medição (0 a 100)
+};
+
+// Buffer dos Sensores e Câmera
+// Armazena os dados sensoriais e sinalização de eventos críticos 
+// A thread de Sensores "Produz" e a thread do Coletor "Consome"
+struct SensorBuffer {
+    // ----- Fila de Dados (Produtor-Consumidor) -----
+    std::queue<Medicao> fila_medicoes; 
+    std::mutex mtx_fila;                // Cadeado para a inserção e remição da fila
+    std::mutex mtx_leituras;            // Cadeado para a leitura dos sensores
+
+    std::condition_variable cv_coletor; // Variável de condição para o Coletor de Dados.
+
+    // ----- Sistema de Alarme - Interrupção (Câmera) -----
+    int e_inspecao = 0;    // Flag que indica se o teto tem falhas: 0 = OK, 1 = Saliência, -1 = Buraco
+    std::mutex mtx_camera;              // Cadeado para proteger a alteração da FLAG
+
+    bool o_liga_camera = false;         // Variável de Condição para a Câmera
+    std::condition_variable cv_camera;  // O alarme da câmera
+
+    float ultima_leitura_lidar = 10.0f; // Última leitura LIDAR, nasce como altura ideal do teto
+    double velocidade_real_medida = 0.0;// Variável compartilhada com o PID e MQTT
+    int ultima_leitura_encoder = 0;    // última leitura Encedor, nasce como posição 0
+
+    // ----- Flags de Sincronismo MQTT -----
+    bool python_conectado = false;      // Controla o Handshake de largada inicial com a GUI
+    bool simulo_concluida = false;      // Sinaliza o fim de curso (Parada geral aos 1000m)
+};
+
+#endif 
+```
+
+## *tasks.hpp*
+
+```cpp
+#ifndef TASKS_HPP
+#define TASKS_HPP
+
+#include "shared_buffers.hpp"
+
+
+void t_comando_navegacao(NavBuffer& nav, SensorBuffer& sensor);
+void t_controle_navegacao(NavBuffer& nav, SensorBuffer& sensor);
+
+// --- Threads do Bloco de Sensores ---
+void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor);
+void t_reconstrucao_teto(SensorBuffer& sensor);
+
+#endif
+```
+
+## *tasks.cpp*
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <boost/asio.hpp>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <functional>
+
+#include "tasks.hpp"
+#include "shared_buffers.hpp"
+#include "Lidar.hpp"
+#include "Odometria.hpp"
+
+// Odometria: Calcula velocidade com base no Encoder do MQTT
+void t_calculo_distancia(NavBuffer& nav, SensorBuffer& sensor) {
+    Odometria odo; 
+    int distancia_anterior = 0;
+
+    boost::asio::io_context io_odo;
+    boost::asio::steady_timer timer_odo(io_odo, boost::asio::chrono::milliseconds(20));
+
+    std::function<void(const boost::system::error_code&)> loop_odo;
+
+    loop_odo = ([&](const boost::system::error_code& erro) { 
+        if(erro) return;
+
+        int dist_atual = distancia_anterior;
+
+        // Captura da última posição do encoder descarregada pelo MQTT
+        {
+            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+            dist_atual = sensor.ultima_leitura_encoder;
+        }
+        // Atualiza a memória de rastreamento para o próximo ciclo de 20ms
+        distancia_anterior = dist_atual;
+
+        timer_odo.expires_at(timer_odo.expiry() + boost::asio::chrono::milliseconds(20));
+        timer_odo.async_wait(loop_odo);
+    });
+
+    timer_odo.async_wait(loop_odo);
+    io_odo.run();
+}
+
+// LIDAR / Reconstrução do teto: Processa média móvel e dispara Alarme 
+void t_reconstrucao_teto(SensorBuffer& sensor) {
+    LidarFilter filtro(5);
+
+    // Inicializa histórico do filtro
+    for (int i = 0; i < 5; i++) {
+        filtro.calcular(10.0f);
+    }
+
+    bool alarme_ativo = false;
+
+    boost::asio::io_context io_lidar;
+    boost::asio::steady_timer timer_lidar(
+        io_lidar,
+        boost::asio::chrono::milliseconds(100)
+    );
+
+    std::function<void(const boost::system::error_code&)> loop_lidar;
+
+    loop_lidar = ([&](const boost::system::error_code& erro) {
+        if (erro) return;
+
+        float leitura_lidar_real = 10.0f;
+
+        // Leitura do último valor recebido
+        {
+            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+            leitura_lidar_real = sensor.ultima_leitura_lidar;
+        }
+
+        // Média móvel
+        float media = filtro.calcular(leitura_lidar_real);
+
+        const float altura_ideal = 10.0f;
+        const float margem_erro = 0.5f;
+
+        bool falha_detectada =
+            (media > altura_ideal + margem_erro) ||
+            (media < altura_ideal - margem_erro);
+
+        // Detectou falha
+        if (falha_detectada) {
+
+            // Só registra e dispara a câmera na primeira vez
+            if (!alarme_ativo) {
+                int falha_atual = 0;
+
+                {
+                    std::lock_guard<std::mutex> lock_tela(mtx_console);
+
+                    if (media > altura_ideal + margem_erro) {
+                        std::cout
+                            << "[LIDAR] FALHA: BURACO detectado! (Media: "
+                            << media << "m)\n";
+                        falha_atual = -1;
+                    } else {
+                        std::cout
+                            << "[LIDAR] FALHA: SALIENCIA detectada! (Media: "
+                            << media << "m)\n";
+                        falha_atual = 1;
+                    }
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(sensor.mtx_camera);
+
+                    sensor.e_inspecao = falha_atual;
+                    sensor.o_liga_camera = true;
+                }
+
+                sensor.cv_camera.notify_one();
+
+                alarme_ativo = true;
+            }
+        }
+        else {
+
+            // Se antes havia falha e agora voltou ao normal,
+            // então o robô já passou pela região defeituosa.
+            if (alarme_ativo) {
+
+                {
+                    std::lock_guard<std::mutex> lock_tela(mtx_console);
+                    std::cout
+                        << "[LIDAR] Regiao inspecionada concluida. "
+                        << "Alarme desligado.\n";
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(sensor.mtx_camera);
+
+                    sensor.e_inspecao = 0;
+                    sensor.o_liga_camera = false;
+                }
+
+                alarme_ativo = false;
+            }
+        }
+
+        timer_lidar.expires_at(
+            timer_lidar.expiry() +
+            boost::asio::chrono::milliseconds(100)
+        );
+
+        timer_lidar.async_wait(loop_lidar);
+    });
+
+    timer_lidar.async_wait(loop_lidar);
+    io_lidar.run();
+}
+```
+
+## *PIDController.hpp*
+
+```cpp
+#ifndef PID_CONTROLLER_HPP
+#define PID_CONTROLLER_HPP
+
+class PIDController {
+private:
+    double Kp, Ki, Kd;
+    double integral;
+    double last_error;
+    double dt;
+    double output_limit;
+    public:
+    PIDController(double kp, double ki, double kd, double sample_time);
+    double compute(double setpoint, double current_value);
+    void reset();
+    void setGains(double kp, double ki, double kd);
+};
+
+#endif
+```
+
+## *PIDController.cpp*
+
+```cpp
+#include "PIDController.hpp"
+#include <algorithm> 
+
+// Bloco: Controle de Navegação
+
+// ----- Construtor da Classe PIDController -----
+// integral(0.0): acumula o erro ao longo do tempo. Parcela I
+// last_error(0.0): Parcela D.
+// dt(sample_time): tempo de amostragem (Delta T).
+// output_limit(100.0): PWM de 100%
+PIDController::PIDController(double kp, double ki, double kd, double sample_time)
+    : Kp(kp), Ki(ki), Kd(kd), integral(0.0), last_error(0.0), 
+    dt(sample_time), output_limit(100.0) {}
+
+// Permite troca de parâmetros P, I e D com o robô em funcionamento.
+void PIDController::setGains(double kp, double ki, double kd) {
+    Kp = kp;
+    Ki = ki;
+    Kd = kd;
+}
+
+// Troca de modo de Manual para Automático: zera tudo.
+void PIDController::reset() {
+    integral = 0.0;
+    last_error = 0.0;
+}
+
+// Motor do PID
+double PIDController::compute(double setpoint, double current_value) {
+    // Onde eu quero estar (setpoint) - onde eu estou agora.
+    double error = setpoint - current_value;
+
+    // Proporcional 
+    double P = Kp * error;
+
+    // Soma do erro ao longo do tempo: Integral
+    integral += error * dt;
+    double I = Ki * integral;
+
+    // Inclinação da reta do erro: Derivativo
+    double derivative = (error - last_error) / dt;
+    double D = Kd * derivative;
+
+    // Atualiza a memória para o próximo ciclo
+    last_error = error;
+
+    double output = P + I + D;
+
+    // Robo só aceita força de -100 a 100
+    if (output > output_limit) {
+        output = output_limit;
+        integral -= error * dt; 
+        
+    } else if (output < -output_limit) {
+        output = -output_limit;
+        integral -= error * dt;
+    }
+
+    return output;
+}
+```
+
+## *NavegationManager.hpp*
+
+```cpp
+#ifndef NAVIGATION_MANAGER_HPP
+#define NAVIGATION_MANAGER_HPP
+
+enum class NavMode { MANUAL, AUTOMATIC };
+
+class NavigationManager {
+private:
+    NavMode currentMode;
+    double targetSpeed;
+
+public:
+    NavigationManager();
+    
+    void updateMode(bool cmdAuto, bool cmdMan);
+    
+    void processInputs(double joystickSpeed, bool btnStop, bool slowDown);
+
+    NavMode getMode() const;
+    double getTargetSpeed() const;
+};
+
+#endif
+```
+
+## *NavegationManager.cpp*
+
+```cpp
+#include "NavigationManager.hpp"
+
+// Bloco: Comando de Navegação
+
+// ----- Construtor da Classe NavigationManager -----
+NavigationManager::NavigationManager() : currentMode(NavMode::MANUAL), targetSpeed(0.0) {}
+
+// Seleção: Manual / Automático
+void NavigationManager::updateMode(bool cmdAuto, bool cmdMan) {
+    if (cmdAuto) {
+        currentMode = NavMode::AUTOMATIC;
+    } else if (cmdMan) {
+        currentMode = NavMode::MANUAL;
+    }
+}
+
+// Acelerador e Freio com lógica de redução de velocidade (slowDown)
+void NavigationManager::processInputs(double joystickSpeed, bool btnStop, bool slowDown) {
+    // 1. Botão de Emergência: Prioridade máxima, o robô para.
+    if (btnStop) {
+        targetSpeed = 0.0;
+        return;
+    }
+
+    // Lógica de Inspeção (slowDown): Se a câmera estiver processando,
+    // a velocidade cai para um valor baixo de 0.5m/s para garantir a qualidade
+    if (slowDown) {
+        targetSpeed = 0.5; 
+    } 
+    else {
+        // Operação Normal
+        if (currentMode == NavMode::MANUAL) {
+            // Velocidade vem do controle joystick
+            targetSpeed = joystickSpeed; 
+        } else {
+            // Velocidade automática nominal: 1.0m/s
+            targetSpeed = 1.0; 
+        }
+    }
+}
+
+NavMode NavigationManager::getMode() const {
+    return currentMode;
+}
+
+double NavigationManager::getTargetSpeed() const {
+    return targetSpeed;
+}
+```
+
+## *Camera.hpp*
+
+```cpp
+#ifndef CAMERA_HPP
+#define CAMERA_HPP
+
+#include "shared_buffers.hpp"
+
+// Thread que simula a inspeção visual detalhada
+void t_inspecao_camera(SensorBuffer& sensor);
+
+// Função para simular carga de CPU (IA)
+void processamento_pesado_ia();
+
+#endif
+```
+
+## *Camera.cpp*
+
+```cpp
+#include "Camera.hpp"
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <chrono>
+
+// Função otimizada para garantir carga real de CPU
+void processamento_pesado_ia() {
+    double resultado = 0.0;
+    // Número de iterações para chegar perto dos 30-40ms 
+    for (int i = 0; i < 700000; ++i) {
+        resultado += std::sin(i) * std::cos(i) * std::tan(i);
+    }
+    
+    // Impede que o compilador ignore o loop (Dead Code Elimination)
+    if(resultado == 0.00000123) std::cout << resultado; 
+}
+
+void t_inspecao_camera(SensorBuffer& sensor) {
+    while (true) {
+        // Bloqueio inicial para esperar o sinal
+        std::unique_lock<std::mutex> lock(sensor.mtx_camera);
+
+        // Aguarda sinalização do LIDAR (o_liga_camera)
+        sensor.cv_camera.wait(lock, [&sensor] { 
+            return sensor.o_liga_camera; 
+        });
+
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[CAMERA] Falha detectada! Iniciando processamento de IA...\n";
+        }
+
+        // Libera o LOCK durante o processamento pesado
+        lock.unlock();
+        
+        auto start = std::chrono::high_resolution_clock::now();
+        processamento_pesado_ia();
+        auto end = std::chrono::high_resolution_clock::now();
+
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+        
+        lock.lock();
+        
+        {
+            std::lock_guard<std::mutex> lock_tela(mtx_console);
+            std::cout << "[CAMERA] Inspecao concluida em " << elapsed.count() << " ms.\n";
+        }
+
+        sensor.o_liga_camera = false;        
+        // O lock é liberado automaticamente ao voltar para o wait ou fim do loop
+    }
+}
+```
+
+## *Coletor.hpp*
+
+```cpp
+#ifndef COLETOR_HPP
+#define COLETOR_HPP
+
+#include <iomanip>
+#include <iostream>
+#include <fstream>
+#include <string>
+#include "shared_buffers.hpp"
+
+// Classe Coletor de Dados: lógica de salvar arquivos no HD 
+class ColetorCSV {
+private:
+    std::ofstream arquivo;
+
+public:
+    // Construtor: Abre o arquivo assim que a classe for instanciada
+    ColetorCSV(const std::string& nome_arquivo) {
+        arquivo.open(nome_arquivo, std::ios::app);
+        if (!arquivo.is_open()) {
+            std::cerr << "[ERRO] Falha ao abrir o arquivo de log: " 
+                << nome_arquivo << std::endl;
+        }
+    }
+
+    // Destrutor: Fecha o arquivo sozinho para não corromper os dados
+    ~ColetorCSV() {
+        if (arquivo.is_open()) {
+            arquivo.close();
+        }
+    }
+
+    bool estaAberto() const {
+        return arquivo.is_open();
+    }
+
+    // Método para salvar os dados
+    void gravar(const Medicao& dado) {
+        if (arquivo.is_open()) {
+            arquivo << dado.timestamp << "," 
+                    << dado.i_encoder << "," 
+                    << std::fixed << std::setprecision(2) << dado.i_lidar << "," 
+                    << std::fixed << std::setprecision(2) 
+                    << dado.nivel_confianca << std::endl;
+        }
+    }
+};
+
+// Protótipo da função da thread
+void t_coletor_dados(SensorBuffer& sensor);
+
+#endif
+```
+
+## *Coletor.cpp*
+
+```cpp
+#include "Coletor.hpp"
+#include <mutex>
+#include <condition_variable>
+#include <cmath> 
+#include <memory>
+#include <fstream>
+#include <iostream>
+
+#include "shared_buffers.hpp"
+
+// Thread responsável por consumir os dados da fila, analisar a confiança e salvar no disco
+void t_coletor_dados(SensorBuffer& sensor, NavBuffer& nav) {
+    
+    // Transforma o logger em um ponteiro dinâmico para ser possível reinicia-lo
+    auto logger = std::make_unique<ColetorCSV>("telemetria_inspecao.csv"); 
+
+    if (!logger->estaAberto()) {
+        std::cout << "[ERRO] Não foi possível abrir o arquivo de telemetria.\n";
+        return;
+    }
+
+    // Variáveis para guardar a última posição e calcular a distância
+    double ultimo_x = 0.0;
+    double ultimo_y = 0.0;
+
+    // ultimo estado do sistema
+    bool sistema_estava_iniciado = false;
+
+    while (true) { 
+
+        // Detecta o início de uma nova inspeção
+        {
+            std::lock_guard<std::mutex> lock_nav(nav.mtx);
+            if (nav.sistema_iniciado && !sistema_estava_iniciado) {
+
+                std::cout << "[COLETOR] Nova inspeção detectada. Reiniciando CSV.\n";
+
+                // Fecha e reseta o arquivo atual
+                logger.reset();
+                std::ofstream resetador("telemetria_inspecao.csv", std::ios::trunc);
+                resetador.close();
+
+                // Recria o arquivo
+                logger = std::make_unique<ColetorCSV>("telemetria_inspecao.csv");
+
+                // Reinicia memória de confiança
+                ultimo_x = 0.0;
+                ultimo_y = 0.0;
+            }
+
+            sistema_estava_iniciado = nav.sistema_iniciado;
+        }
+        std::unique_lock<std::mutex> lock_fila(sensor.mtx_fila);
+
+        sensor.cv_coletor.wait(lock_fila, [&sensor] { 
+            return !sensor.fila_medicoes.empty(); 
+        });
+        
+        while (!sensor.fila_medicoes.empty()) {
+            Medicao dado = sensor.fila_medicoes.front();
+            sensor.fila_medicoes.pop();
+
+            // --- Análise de Confiança ---
+            
+            // Calcula a distância entre o ponto atual e o último ponto
+            double distancia = std::sqrt(std::pow(dado.i_encoder - ultimo_x, 2) + 
+                                         std::pow(dado.i_lidar - ultimo_y, 2));
+
+            // Lógica de Confiança: Se a distância aumenta, a confiança cai.
+            // O fator "5.0" é um multiplicador de sensibilidade
+            double confianca_calculada = 100.0 - (distancia * 5.0);
+            
+            // Travas de segurança para não ter confiança negativa ou acima de 100%
+            if (confianca_calculada < 0.0) confianca_calculada = 0.0;
+            if (confianca_calculada > 100.0) confianca_calculada = 100.0;
+
+            dado.nivel_confianca = confianca_calculada;
+            ultimo_x = dado.i_encoder;
+            ultimo_y = dado.i_lidar;
+
+            // Destranca para gravar no HD 
+            lock_fila.unlock(); 
+            logger->gravar(dado);
+            lock_fila.lock(); 
+        } 
+    }
+}
+```
+
+## *Odometria.hpp*
+
+```cpp
+#ifndef ODOMETRIA_HPP
+#define ODOMETRIA_HPP
+
+class Odometria {
+private:
+    bool estado_anterior = false;
+    int distancia_total_x = 0;
+
+public:
+    Odometria();
+    int atualizar(bool sinal_encoder);
+    int get_distancia();
+};
+
+#endif
+```
+
+## *Odometria.cpp*
+
+```cpp
+#include "Odometria.hpp"
+
+#include <iostream>
+
+// Bloco: Cálculo da distância percorrida
+
+// ----- Contrutor da Classe Odometria -----
+// distancia_total_x(0): robô é ligado, roda está parada -> distância inicial = 0.
+// estado_anterior(false): sensor começou desligado.
+Odometria::Odometria() : estado_anterior(false), distancia_total_x(0) {}
+
+// Borda de Subida
+int Odometria::atualizar(bool sinal_encoder) {
+
+    // Detecta borda de subida
+    // garante contagem única apenas na exata transição de 0 para 1.
+    if (sinal_encoder && !estado_anterior) {
+        distancia_total_x++; // Soma 1 metro
+    }
+
+    // Atualiza memória
+    estado_anterior = sinal_encoder;
+    
+    return distancia_total_x;
+}
+
+int Odometria::get_distancia() {
+    return distancia_total_x;
+}
+```
+
+## *Lidar.hpp*
+
+```cpp
+#ifndef LIDAR_HPP
+#define LIDAR_HPP
+
+#include <vector>
+
+class LidarFilter {
+private:
+    std::vector<int> buffer;
+    int head = 0;
+    int window_size;
+    float ultima_media = 0.0;
+
+public:
+    // Escolha: size = 5. Com a janela cíclica de 100ms, uma janela de tamanho 5
+    // dá um atraso de meio segundo, filtrando picos isolados do sensor.
+    LidarFilter(int size = 5);
+    float calcular(float nova_leitura);
+    float get_ultima_media();
+};
+
+#endif
+```
+
+## *Lidar.cpp*
+
+```cpp
+#include "Lidar.hpp"
+#include <numeric>
+#include <iostream>
+
+// Bloco: Reconstrução superfície do teto do túnel
+
+// Lógica: Filtro de Média Móvel com Buffer Circular
+// Guarda as última "N" leituras e tira uma média, suavizando a visão
+// do robô e eliminando ruídos. 
+
+// ----- Construtor da classe LidarFilter -----
+// size: tamanho da janela.
+// buffer(size, 0): cria uma lista com 'size' espaços.
+// window_size(size): guarda o número 'size' para calcular a média.
+LidarFilter::LidarFilter(int size) : buffer(size, 0), window_size(size) {}
+
+// Buffer Circular 
+float LidarFilter::calcular(float nova_leitura) {
+
+    // Substitui a leitura mais velha pela mais nova.
+    buffer[head] = nova_leitura;
+
+    // Lógica do buffer circular: quando o resto da divisão da posição pelo tamanho da janela
+    // for 0 (indicando estar na última posição do buffer), head volta para a primeira posição.
+    head = (head + 1) % window_size;
+
+    // Função accumulate soma todos os itens da lista.
+    float soma = std::accumulate(buffer.begin(), buffer.end(), 0.0f);
+
+    ultima_media = soma / window_size;
+    
+    return ultima_media;
+}
+
+// Para leitura da última medida
+float LidarFilter::get_ultima_media() {
+    return ultima_media;
+}
+```
+## *cpp_mqtt.cpp*
+
+```C
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// MÓDULO DE COMUNICAÇÃO MQTT
+
+// Responsável por:
+
+// 1) Receber dados dos sensores simulados pelo Python
+// 2) Receber comandos enviados pela Interface Gráfica (GUI)
+// 3) Publicar comandos de controle para o simulador
+// 4) Publicar estados e alarmes para a GUI
+
+// Estrutura de comunicação:
+
+//      Python <-> Broker MQTT <-> Backend C++ <-> GUI
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#include <condition_variable>
+#include <iostream>
+#include <string>
+#include <boost/asio.hpp>
+#include <chrono>
+#include <mutex>
+#include <thread>
+#include "MQTTClient.h"
+
+#include "shared_buffers.hpp" 
+
+#define ENDERECO    "tcp://localhost:1883" // Endereço do broker MQTT (Mosquitto)
+#define CLIENTID    "Backend_CPP_Oficial"  // Identificador do cliente MQTT
+
+// Estruturas glogais compartilhadas entre threads do sistema
+extern SensorBuffer sensor; 
+extern NavBuffer nav;
+
+static double memoria_spinbox = 1.0;
+
+// Variáveis de sincronismo. Backend C++ aguarda até que o simulador Python diga "PYTHON_READY"
+std::mutex mtx_handshake;
+std::condition_variable cv_handshake;
+bool python_reconhecido = false;
+
+// CALLBACK - Processamento de dados recebidos da rede MQTT
+// - Receber dados de sensores
+// - Receber comandos da GUI
+// - Atualizar buffers compartilhados
+// - Sinalizar threads consumidoras
+// - Realizar sincronismo do sistema
+int ao_receber_mensagem(void *context, char *topicName, int topicLen, MQTTClient_message *message) {
+    // Converte os dados recebidos da biblioteca MQTT para objetos std::string
+    std::string topico(topicName);
+    std::string payload((char*)message->payload, message->payloadlen);
+
+    // Checagem de sincronismo
+    if (topico == "tunel/sistema/status") {
+        if (payload == "PYTHON_READY") { // Broker conectado
+            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+            sensor.python_conectado = true; // Marca o simulador como disponível
+
+            {
+                std::lock_guard<std::mutex> lock_hs(mtx_handshake);
+                python_reconhecido = true;
+            }
+            cv_handshake.notify_one(); // Acorda a thread
+
+            std::cout << "[SINCRONISMO] Sinal 'PYTHON_READY' capturado.\n";
+        }
+        else if (payload == "SIMULACAO_CONCLUIDA") {
+            {
+                std::lock_guard<std::mutex> lock_sensor(sensor.mtx_leituras);
+                sensor.ultima_leitura_encoder = 0;
+                sensor.ultima_leitura_lidar = 0.0;
+                sensor.velocidade_real_medida = 0.0;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock_nav(nav.mtx);
+                nav.c_para = true;
+                nav.velocidade_joystick = 0.0;
+                nav.e_automatico = false;
+                nav.sistema_iniciado = false;
+            }
+            std::cout << "[FIM DE CURSO] Sinal 'SIMULACAO_CONCLUIDA' recebido do Python.\n";
+        }
+    }
+    // Seleção de modo Manual/Automático, vindo da GUI
+    else if (topico == "tunel/controle/modo") {
+        std::lock_guard<std::mutex> lock(nav.mtx);
+        if (payload == "AUTO") {
+            nav.c_automatico = true;
+            nav.c_man = false;
+        } else {
+            nav.c_automatico = false;
+            nav.c_man = true;
+        }
+    }
+    // Dados físicos da posição do robô, recebe leituras do encoder
+    else if (topico == "tunel/sensor/encoder") {
+        try {
+            // Tolerância a falhas de rede: Evita a quebra do processo C++ ao 
+            // tentar converter payloads malformados.
+            // Se a conversão falhar, a exceção é capturada, o pacote sujo é descartado, 
+            // e o robô mantém sua estabilidade.
+            int leitura_encoder = std::stoi(payload);
+            
+            {
+                std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+                sensor.ultima_leitura_encoder = leitura_encoder; // Atualização da última leitura
+            }
+            
+            { // criação da medição
+                std::lock_guard<std::mutex> lock(sensor.mtx_fila);
+
+                Medicao nova_medicao;  // Estrutura de um instante completo de observação
+                                    // - posição encoder
+                                    // - leitura lidar
+                                    // - timestamp
+                                    // - nível de confiança
+
+                nova_medicao.i_encoder = leitura_encoder; // Valor absoluto do encoder
+                nova_medicao.timestamp = std::chrono::steady_clock::now()
+                    .time_since_epoch()
+                    .count(); // Momento em que a medição foi recebida
+                nova_medicao.i_lidar = sensor.ultima_leitura_lidar; // Associa último valor LIDAR conhecido
+                nova_medicao.nivel_confianca = 100;
+                sensor.fila_medicoes.push(nova_medicao); // Insere a medição na fila compartilhada
+            }
+
+            // Avisa a thread do coletor que tem uma nova medição para ser gravada
+            sensor.cv_coletor.notify_one();
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[ERRO MQTT] Lixo de rede descartado no Encoder: '" << payload << "'\n";
+        } 
+    } 
+    // Dados físicos da leitura do teto
+    else if (topico == "tunel/sensor/lidar") {
+        try {
+            // Tolerância a falhas de rede: Evita a quebra do processo C++ 
+            // ao tentar converter payloads malformados.
+            // Se a conversão falhar, a exceção é capturada, o pacote sujo é descartado, 
+            // e o robô mantém sua estabilidade.
+            float leitura_lidar = std::stof(payload);
+            {
+                std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+                sensor.ultima_leitura_lidar = leitura_lidar;
+            }
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[ERRO MQTT] Lixo de rede descartado no LIDAR: '" << payload << "\n";
+        }
+    }
+    // Comandos botões: modo Manual (DIREITA/ESQUERDA) e geral (PARAR/CONTINUAR)
+    else if (topico == "tunel/controle/direcao") {
+        std::lock_guard<std::mutex> lock(nav.mtx);
+        if (payload == "DIREITA") {
+            nav.c_para = false;
+            nav.velocidade_joystick = memoria_spinbox; // Garante ir pra frente
+        } 
+        else if (payload == "ESQUERDA") {
+            nav.c_para = false;
+            nav.velocidade_joystick = -memoria_spinbox; // Dá ré
+        } 
+        else if (payload == "PARAR") {
+            nav.c_para = true; 
+            std::cout << "[MQTT-IN] EMERGÊNCIA acionada.\n";
+        }
+        else if (payload == "CONTINUAR") {
+            nav.c_para = false; 
+            std::cout << "[MQTT-IN] RETOMANDO: Emergência desativada.\n";
+        }
+        else if (payload == "SIMULACAO_CONCLUIDA") {
+            std::lock_guard<std::mutex> lock(nav.mtx);
+            nav.c_para = true;
+            nav.velocidade_joystick = 0.0;
+            nav.e_automatico = false;
+
+            sensor.ultima_leitura_lidar = 0.0;
+            sensor.ultima_leitura_encoder = 0;
+            sensor.velocidade_real_medida = 0.0;
+
+            std::cout << "[MQTT-IN] STATUS: SIMULAÇÃO CONCLUÍDA!\n";
+        }
+    }
+    // Iniciar a Inspeção
+    else if (topico == "tunel/cmd/iniciar") { // Botão iniciar
+        std::lock_guard<std::mutex> lock_nav(nav.mtx);
+        if (payload == "1") {
+            nav.sistema_iniciado = true;
+            nav.c_para = false;
+            std::cout << "[MQTT-IN] Comando INICIAR recebido!\n";
+        }
+    }
+    // Velocidade medida
+    else if (topico == "tunel/sensor/velocidade") {
+        try {
+            // Tolerância a falhas de rede: Evita a quebra do processo C++ 
+            // ao tentar converter payloads malformados.
+            // Se a conversão falhar, a exceção é capturada, o pacote sujo é descartado, 
+            // e o robô mantém sua estabilidade.
+            double vel = std::stod(payload);
+
+            // Recebe a velocidade calculada pelo simulador físico
+            // Utilizada para realimentação do controlador e exibição na interface
+            std::lock_guard<std::mutex> lock(sensor.mtx_leituras);
+            sensor.velocidade_real_medida = vel;
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[ERRO MQTT] Lixo de rede descartado na Velocidade: '" << payload << "\n";
+        }
+    }
+    // Captura a ordem de mudança de modo vinda do botão "INICIAR"
+    else if (topico == "tunel/controle/modo" || topico == "tunel/cmd/modo") {
+        std::lock_guard<std::mutex> lock(nav.mtx);
+        if (payload == "AUTO" || payload == "1") {
+            nav.e_automatico = true;
+            std::cout << "[MQTT-IN] Ordem recebida: Modo AUTOMATICO ativado.\n";
+        } else {
+            nav.e_automatico = false;
+            std::cout << "[MQTT-IN] Ordem recebida: Modo MANUAL ativado.\n";
+        }
+    }
+
+    // Liberação de recursos alocados
+    MQTTClient_freeMessage(&message);
+    MQTTClient_free(topicName);
+    return 1;
+}
+
+
+// Thread de comunicação MQTT:
+// - conectar ao broker;
+// - inscrever-se nos tópicos;
+// - realizar handshake;
+// - publicar aceleração, alarme e velocidade;
+// - receber mensagens
+void t_comunicacao_mqtt(){
+    
+    MQTTClient client;
+
+    // Criação da instancia local do cliente MQTT associada ao broker configurado
+    MQTTClient_create(&client, 
+        ENDERECO, 
+        CLIENTID, 
+        MQTTCLIENT_PERSISTENCE_NONE, 
+        NULL
+    );
+
+    // Registra a função que será chamada automaticamente
+    // sempre que uma mensagem MQTT chegar
+    MQTTClient_setCallbacks(client, 
+        NULL, 
+        NULL, 
+        ao_receber_mensagem, 
+        NULL
+    );
+
+    // Estrutura para os parâmetros de conexão
+    MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
+
+    conn_opts.keepAliveInterval = 60; // Mensagens periódicas a cada 60s
+    conn_opts.cleansession = 1; // Solicita uma sessão limpa
+    
+    if (MQTTClient_connect(client, &conn_opts) != MQTTCLIENT_SUCCESS) {
+        std::cout << "[ERRO] Falha ao conectar C++ no Mosquitto!\n";
+        return; 
+    }
+    
+    std::cout << "[SISTEMA] Thread MQTT Conectada. Inicializando Handshake com a Interface...\n";
+
+    // Inscrição nos tópicos de Sensores, Sincronismo e Controles da GUI
+    // QoS nível 1: "Pelo menos uma vez". A mensagem tem garantia absoluta de que vai chegar.
+    MQTTClient_subscribe(client, "tunel/sensor/camera", 1);
+    MQTTClient_subscribe(client, "tunel/sistema/status", 1);
+    MQTTClient_subscribe(client, "tunel/sensor/encoder", 1);
+    MQTTClient_subscribe(client, "tunel/sensor/lidar", 1);
+    MQTTClient_subscribe(client, "tunel/controle/modo", 1);
+    MQTTClient_subscribe(client, "tunel/controle/direcao", 1);
+    MQTTClient_subscribe(client, "tunel/cmd/iniciar", 1);
+    MQTTClient_subscribe(client, "tunel/sensor/velocidade", 1);
+    MQTTClient_subscribe(client, "tunel/cmd/modo", 1);
+    MQTTClient_subscribe(client, "tunel/controle/modo", 1);
+
+    {
+        std::unique_lock<std::mutex> lock_hs(mtx_handshake);
+        cv_handshake.wait(lock_hs, [] { return python_reconhecido; });
+    }
+
+    MQTTClient_message msg_handshake = MQTTClient_message_initializer;
+
+    std::string payload_ready = "CPP_READY"; // Resposta do Backend após reconhecer o Python
+    msg_handshake.payload = (void*)payload_ready.c_str();
+    msg_handshake.payloadlen = payload_ready.length();
+    msg_handshake.qos = 1; 
+    msg_handshake.retained = 1;
+    MQTTClient_publishMessage(client, "tunel/sistema/status", &msg_handshake, NULL);
+    std::cout << "[OK] Handshake Concluído! Enviado 'CPP_READY'.\n";
+
+    boost::asio::io_context io;
+    boost::asio::steady_timer temporizador(io);
+    
+    auto proximo_ciclo = std::chrono::steady_clock::now();
+
+    // Variável para detectar a "borda de subida" do alarme
+    int estado_anterior_alarme = 0;
+
+    while(true) {
+        proximo_ciclo += std::chrono::milliseconds(50);
+
+        double controle_pid_aceleracao;
+        int controle_status_alarme;
+        double velocidade_atual_calculada;
+        bool estado_atual_alarme;
+
+        // Captura das variáveis de controle e odometria
+        {
+            std::lock_guard<std::mutex> lock_nav(nav.mtx);
+            controle_pid_aceleracao = nav.o_aceleracao;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock_cam(sensor.mtx_camera);
+            // Converte o estado booleano da inspeção
+            // para um valor inteiro adequado para
+            // transmissão MQTT
+            controle_status_alarme = sensor.e_inspecao;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock_leituras(sensor.mtx_leituras);
+            velocidade_atual_calculada = sensor.velocidade_real_medida;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock_cam(sensor.mtx_camera);
+            estado_atual_alarme = sensor.e_inspecao;
+        }
+
+        // Publicações
+
+        // Publica a ação da câmera
+        if (estado_atual_alarme != 0 && estado_anterior_alarme == 0) {
+            std::string payload_cam = "CLICK";
+            MQTTClient_message msg_camera = MQTTClient_message_initializer;
+            msg_camera.payload = (void*)payload_cam.c_str();
+            msg_camera.payloadlen = payload_cam.length();
+            msg_camera.qos = 1; 
+            msg_camera.retained = 0;
+            
+            MQTTClient_publishMessage(
+                client, 
+                "tunel/sensor/camera", 
+                &msg_camera, 
+                NULL
+            );
+            
+            // Log impossível de ignorar no terminal C++
+            std::cout << "[MQTT-OUT] Pulso de FLASH enviado para o Python.\n";
+        }
+        // Atualiza a memória para o próximo ciclo
+        estado_anterior_alarme = estado_atual_alarme;
+
+        // Publica a aceleração para o simulador do Python rodar a física
+        std::string payload_accel = std::to_string(controle_pid_aceleracao);
+        MQTTClient_message msg_aceleracao = MQTTClient_message_initializer;
+        msg_aceleracao.payload = (void*)payload_accel.c_str();
+        msg_aceleracao.payloadlen = payload_accel.length();
+        msg_aceleracao.qos = 1; 
+        msg_aceleracao.retained = 0;
+        MQTTClient_publishMessage(
+            client, 
+            "tunel/cmd/aceleracao", 
+            &msg_aceleracao, 
+            NULL
+        );
+
+        // Publica o alarme de inspeção para a GUI atualizar o painel de alarmes
+        std::string payload_insp = std::to_string(controle_status_alarme);
+        MQTTClient_message msg_alarme = MQTTClient_message_initializer;
+        msg_alarme.payload = (void*)payload_insp.c_str();
+        msg_alarme.payloadlen = payload_insp.length();
+        msg_alarme.qos = 1; 
+        msg_alarme.retained = 0;
+        MQTTClient_publishMessage(
+            client, 
+            "tunel/status/inspecao", 
+            &msg_alarme, 
+            NULL
+        );
+
+        // Publica a velocidade derivada pela odometria C++ para a GUI sair do zero
+        std::string payload_vel = std::to_string(velocidade_atual_calculada);
+        MQTTClient_message msg_velocidade = MQTTClient_message_initializer;
+        msg_velocidade.payload = (void*)payload_vel.c_str();
+        msg_velocidade.payloadlen = payload_vel.length();
+        msg_velocidade.qos = 1; 
+        msg_velocidade.retained = 0;
+        MQTTClient_publishMessage(
+            client, 
+            "tunel/sensor/velocidade", 
+            &msg_velocidade, 
+            NULL
+        );
+
+        temporizador.expires_at(proximo_ciclo);
+        temporizador.wait();
+    }
+
+    // Liberação e desconexão limpa de portas
+    MQTTClient_unsubscribe(client, "tunel/sensor/camera");
+    MQTTClient_unsubscribe(client, "tunel/sensor/encoder");
+    MQTTClient_unsubscribe(client, "tunel/sensor/lidar");
+    MQTTClient_unsubscribe(client, "tunel/controle/modo");
+    MQTTClient_unsubscribe(client, "tunel/controle/direcao");
+    MQTTClient_unsubscribe(client, "tunel/sistema/status");
+    MQTTClient_unsubscribe(client, "tunel/cmd/iniciar");
+    MQTTClient_unsubscribe(client, "tunel/cmd/modo");
+    MQTTClient_unsubscribe(client, "tunel/controle/modo");
+    
+    MQTTClient_disconnect(client, 5000);
+    MQTTClient_destroy(&client);
+}
+```
+
+## *py_mqtt.py*
+
+```python
+
+#!/usr/bin/env python3
+import time
+import pygame
+import paho.mqtt.client as mqtt
+from robot_physics import RobotPhysicsSimulator
+
+# Variáveis Globais de Controle de Rede MQTT
+aceleracao_recebida_cpp = 0.0
+status_inspecao = 0
+cpp_pronto = False  
+sistema_iniciado = False
+reset_solicitado = False
+
+# Callback de recebimento 
+# Atualiza as variáveis globais assim que uma ordem chega do C++ ou da GUI
+def ao_receber_mensagem(client, userdata, msg):
+    global aceleracao_recebida_cpp, status_inspecao, cpp_pronto, sistema_iniciado, reset_solicitado
+    
+    topico = msg.topic
+    payload = msg.payload.decode()
+    
+    if topico == "tunel/cmd/aceleracao":
+        aceleracao_recebida_cpp = float(payload)
+    elif topico == "tunel/status/inspecao":
+        status_inspecao = int(payload)
+    elif topico == "tunel/sistema/status" and payload == "CPP_READY":
+        cpp_pronto = True
+    elif topico == "tunel/cmd/iniciar" and payload == "1":
+        sistema_iniciado = True
+    elif topico == "tunel/sistema/status" and payload == "SIMULACAO_CONCLUIDA":
+        sistema_iniciado = False
+        reset_solicitado = True
+
+if __name__ == "__main__":
+    print("[SISTEMA] Inicializando Ponte MQTT com a Física do Robô...")
+    pygame.init()
+    
+    # Configuração e Conexão do cliente MQTT
+    cliente_mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    cliente_mqtt.on_message = ao_receber_mensagem
+    cliente_mqtt.connect("localhost", 1883, 60)
+    
+    # Inscrição nos tópicos de controle e sincronismo
+    cliente_mqtt.subscribe("tunel/sensor/camera")
+    cliente_mqtt.subscribe("tunel/cmd/aceleracao")
+    cliente_mqtt.subscribe("tunel/status/inspecao")
+    cliente_mqtt.subscribe("tunel/sistema/status")
+    cliente_mqtt.subscribe("tunel/cmd/iniciar")
+    cliente_mqtt.loop_start() # Inicia a thread paralela da rede do Paho MQTT
+    
+    # Simulação física só começa a rodar quando o Python avisa que está vivo
+    print("[SINCRONISMO] Publicando 'PYTHON_READY' e aguardando o Back-end C++...")
+    cliente_mqtt.publish("tunel/sistema/status", "PYTHON_READY", retain=True)
+    
+    # Trava a inicialização aqui até receber a resposta do C++
+    while not cpp_pronto:
+        time.sleep(0.1)
+    print("[OK] Handshake bem-sucedido! C++ detectado na rede.")
+    
+    # Instanciando o simulador físico após o sincronismo
+    simulador = RobotPhysicsSimulator(dt=0.02)
+    tempo_simulado = 0.0
+    ultima_pos_enviada = -1.0 
+    clock = pygame.time.Clock() 
+    
+    print("[OK] Iniciando loop de tempo real (Túnel: 250m)...")
+    
+    try:
+        # Motor em Tempo Real - 50Hz
+        while True:
+            # Lógica para robô voltar ao início do túnel
+            if reset_solicitado and aceleracao_recebida_cpp == 0.0:
+                print("\n[SIMULADOR FÍSICO] Reset Total: Robô teletransportado para o início do túnel.")
+                
+                simulador = RobotPhysicsSimulator(dt=0.02) # Nova instância do simulador
+                
+                # Zera as memórias de tempo e rede
+                tempo_simulado = 0.0
+                ultima_pos_enviada = -1.0 
+                aceleracao_recebida_cpp = 0.0
+                reset_solicitado = False
+                
+                continue 
+
+            telemetria = simulador.obter_estado_telemetria(sensor_ligado=sistema_iniciado)
+            pos_atual = telemetria["posicao_x"]
+            vel_real = telemetria["velocidade_real"]
+            
+            # Publica a velocidade real e leitura do lidar continuamente para a GUI ler
+            cliente_mqtt.publish("tunel/sensor/velocidade", float(vel_real))
+            cliente_mqtt.publish("tunel/sensor/lidar", float(telemetria["leitura_lidar"]))
+            
+            # Controle de vazão de rede (Filtro de QoS) baseado em metros inteiros
+            pos_inteira = int(pos_atual)
+            if pos_inteira != ultima_pos_enviada and pos_atual < 250.0:
+                cliente_mqtt.publish("tunel/sensor/encoder", pos_inteira)
+                ultima_pos_enviada = pos_inteira
+            
+            # Atualiza a engine física com a aceleração vinda da malha de controle do C++
+            simulador.atualizar_física(aceleracao_recebida_cpp)
+            
+            # Impressão da telemetria a cada 0.05s ou no fim do túnel
+            if int(tempo_simulado / 0.02) % 25 == 0 or pos_atual >= 250.0: 
+                if not sistema_iniciado:
+                    print(f"Tempo: {tempo_simulado:.2f}s | [STANDBY] Aguardando comando INICIAR pela GUI...")
+                else:
+                    alerta = "ALARME!" if status_inspecao == 1 else "OK"
+                    vel_exibida = 0.00 if pos_atual >= 250.0 else vel_real
+                    accel_exibida = 0.00 if pos_atual >= 250.0 else aceleracao_recebida_cpp
+                    pos_exibida = 250.00 if pos_atual >= 250.0 else pos_atual
+
+                    print(f"Tempo: {tempo_simulado:.2f}s | "
+                          f"Pos X: {pos_exibida:>6.2f}m | "
+                          f"Vel: {vel_exibida:>5.2f} m/s | "
+                          f"LIDAR: {telemetria['leitura_lidar']:.3f}m | "
+                          f"PID C++ Accel: {accel_exibida:>6.2f} m/s² | Status: {alerta}")
+            
+            # Trava de segurança - Fim de curso crítico
+            if pos_atual >= 250.0:
+                print(f"\n[FIM DE CURSO] Linha de chegada atingida ({pos_atual:.2f}m).")
+                print("[SISTEMA] Cravando velocidade e aceleração em zero absoluto.")
+                
+                # Força os estados residuais finais na rede para o Coletor e GUI
+                cliente_mqtt.publish("tunel/sensor/encoder", 250)
+                cliente_mqtt.publish("tunel/sensor/velocidade", 0.0)
+                cliente_mqtt.publish("tunel/sensor/lidar", 10.0)
+                
+                # Envia o comando de reset final no tópico de status do sistema
+                cliente_mqtt.publish("tunel/sistema/status", "SIMULACAO_CONCLUIDA", retain=True)
+                
+                time.sleep(0.5)
+                
+            clock.tick(50) 
+            tempo_simulado += 0.02
+            
+    except KeyboardInterrupt:
+        print("\n[SISTEMA] Interrupção manual do usuário recebida.")
+    finally:
+        print("[SISTEMA] Encerrando simulador de forma segura e liberando portas...")
+        cliente_mqtt.loop_stop()
+        cliente_mqtt.disconnect()
+        pygame.quit()
+```
+
+## *robot_physics.py*
+
+```python
+#!/usr/bin/env python3
+import random
+import math
+import pygame
+
+from mapa_tunel import calcular_altura_teto
+
+# Motor físico do ambiente - Simulação do mundo real
+class RobotPhysicsSimulator:
+    def __init__(self, dt=0.02):
+        self.dt = dt
+        
+        # Estados dinâmicos do robô (nascem em repouso)
+        self.posicao_x = 0.0      
+        self.velocidade_x = 0.0   
+        self.aceleracao_x = 0.0   
+        
+        # Parâmetros do cenário estendido do túnel
+        self.comprimento_tunel = 250  
+        self.altura_nominal_teto = 10.0 
+
+        # Desvio padrão do Ruído Branco
+        self.ruido_desvio_padrao = 0.03 
+        
+        self.resolucao_mapa = 0.1  
+        self.mapa_teto = self._gerar_perfil_teto()
+
+    def _gerar_perfil_teto(self):
+        """Gera o vetor discreto do teto."""
+        num_pontos = int(self.comprimento_tunel / self.resolucao_mapa)
+        perfil = []
+        for i in range(num_pontos):
+            x_metros = i * self.resolucao_mapa
+            perfil.append(calcular_altura_teto(x_metros))
+        return perfil
+
+    def atualizar_física(self, nova_aceleracao):
+        self.aceleracao_x = max(min(nova_aceleracao, 100.0), -100.0) # Limites de força do robo
+        
+        # Fator mecânico de inércia
+        aceleracao_real = self.aceleracao_x * 0.1 
+        
+        # Integra a aceleração para encontrar a velocidade (V = V0 + a*dt)
+        self.velocidade_x += aceleracao_real * self.dt
+            
+        # Integra a velocidade para encontrar a nova posição (X = X0 + V*dt)
+        self.posicao_x += self.velocidade_x * self.dt
+        
+        # Proteção estrita de fim de curso (250m)
+        if self.posicao_x > self.comprimento_tunel:
+            self.posicao_x = float(self.comprimento_tunel)
+            self.velocidade_x = 0.0
+            self.aceleracao_x = 0.0
+
+    def ler_sensor_lidar(self):
+        # Transforma a posição contínua em metros num índice discreto do vetor
+        indice = int(self.posicao_x / self.resolucao_mapa)
+
+        # Trava de segurança da array para não tentar ler fora da memória
+        indice = max(min(indice, len(self.mapa_teto) - 1), 0)
+        
+        altura_base = self.mapa_teto[indice]
+
+        # Injeta ruído estocástico na medição 
+        ruido = random.gauss(0, self.ruido_desvio_padrao)
+        
+        return round(altura_base + ruido, 3)
+
+    def obter_estado_telemetria(self, sensor_ligado=True):
+        # Empacota os dados para enviar para o MQTT
+        return {
+            "posicao_x": round(self.posicao_x, 4),
+            "velocidade_real": round(self.velocidade_x, 4),
+            "aceleracao_atual": round(self.aceleracao_x, 4),
+            "leitura_lidar": self.ler_sensor_lidar() if sensor_ligado else 10.0
+        }
+
+if __name__ == "__main__":
+    print("[TESTE FISICA] Iniciando simulação temporal estável (Túnel: 250m)...")
+    pygame.init()
+    
+    simulador = RobotPhysicsSimulator(dt=0.02)
+    aceleracao_mock = 45.0 
+    tempo_simulado = 0.0
+    clock = pygame.time.Clock()
+    
+    # Executa por 500 ciclos para dar tempo de o robô correr mais no túnel longo
+    for _ in range(500): 
+        simulador.atualizar_física(aceleracao_mock)
+        telemetria = simulador.obter_estado_telemetria()
+        
+        if int(tempo_simulado / 0.02) % 25 == 0:
+            print(f"Tempo: {tempo_simulado:.2f}s | "
+                  f"Pos X: {telemetria['posicao_x']:>7.2f}m | "
+                  f"Vel: {telemetria['velocidade_real']:>5.2f} m/s | "
+                  f"LIDAR: {telemetria['leitura_lidar']:.3f}m")
+            
+        clock.tick(50) 
+        tempo_simulado += 0.02
+        
+    pygame.quit()
+```
+
+## *gui_main.py*
+
+```python
+#!/usr/bin/env python3
+import sys
+import os
+import shutil
+import datetime
+import paho.mqtt.client as mqtt
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, 
+                             QVBoxLayout, QPushButton, QFrame, QLabel, 
+                             QSplitter, QGroupBox, QFormLayout)
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
+
+# Importando a visualização 2D e Gráfico da superficie
+from view_2d import PygameWidget
+from grafico_lidar import GraficoLidar
+
+# Classe para comunicação do MQTT com a interface
+class SinaisMQTT(QObject):
+    
+    dados_recebidos = pyqtSignal(str, str)
+
+class GUIOperacaoRemota(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ATR 2026/1 - GUI Operação Remota (Centro de Controle)")
+        self.setGeometry(100, 100, 1100, 750)
+
+        # cria sistema de sinais para atualizar a interface 
+        self.sinais = SinaisMQTT()
+        # Sempre que um dado MQTT chega, chama processar_atualizacao_gui()
+        self.sinais.dados_recebidos.connect(self.processar_atualizacao_gui)
+
+        # Armazena a telemetria mais recente
+        self.ultimo_encoder = 0
+        self.ultima_velocidade = 0.0
+        self.ultimo_lidar = 10.0
+        self.ultima_aceleracao = 0.0
+        self.status_inspecao = 0
+
+        self.modo_operacao = "0" # Modo inicial Manual 
+        self.missao_iniciada = False # Missão começa não iniciada
+
+        # Timer que atualiza a interface a cada 100ms
+        self.timer_tela = QTimer()
+        self.timer_tela.timeout.connect(self.atualizar_tela)
+        self.timer_tela.start(100) 
+
+        self.init_ui() # Monta a interface
+        self.init_mqtt() # Inicializa a comunicação MQTT
+
+    def init_ui(self):
+        # Interface gráfica: janela, botões, labels e layouts
+        widget_central = QWidget()
+        self.setCentralWidget(widget_central)
+        layout_principal = QHBoxLayout(widget_central)
+
+        # Painel de controle esquerdo
+        painel_controle = QWidget()
+        painel_controle.setFixedWidth(380)
+        layout_painel = QVBoxLayout(painel_controle)
+        layout_painel.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        grupo_estados = QGroupBox("Telemetria do Robô")
+        layout_estados = QFormLayout(grupo_estados)
+        
+        self.lbl_modo = QLabel("Selecionar")
+        self.lbl_modo.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
+        self.lbl_inspecao = QLabel("Aguardando...")
+        self.lbl_inspecao.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
+        
+        self.lbl_encoder = QLabel("0 m")
+        self.lbl_velocidade = QLabel("0.00 m/s")
+        self.lbl_lidar = QLabel("10.00 m")
+        self.lbl_aceleracao = QLabel("0.00 m/s²")
+        
+        layout_estados.addRow("Modo de Operação:", self.lbl_modo)
+        layout_estados.addRow("Status Inspeção:", self.lbl_inspecao)
+        layout_estados.addRow("Posição (Encoder):", self.lbl_encoder)
+        layout_estados.addRow("Velocidade Atual:", self.lbl_velocidade)
+        layout_estados.addRow("Distância Teto (LIDAR):", self.lbl_lidar)
+        layout_estados.addRow("Aceleração:", self.lbl_aceleracao)
+        
+        layout_painel.addWidget(grupo_estados)
+
+        grupo_comandos = QGroupBox("Comandos Remotos")
+        layout_comandos = QVBoxLayout(grupo_comandos)
+
+        layout_modos = QHBoxLayout()
+        self.btn_modo_auto = QPushButton("Automático")
+        self.btn_modo_man = QPushButton("Manual")
+        self.btn_modo_auto.clicked.connect(lambda: self.publish_comando("modo", "AUTOMATICO"))
+        self.btn_modo_man.clicked.connect(lambda: self.publish_comando("modo", "MANUAL"))
+        layout_modos.addWidget(self.btn_modo_auto)
+        layout_modos.addWidget(self.btn_modo_man)
+        layout_comandos.addLayout(layout_modos)
+
+        # Botões de Direção e Movimentação Manual
+        layout_dir = QHBoxLayout()
+        self.btn_esquerda = QPushButton("◀ Esquerda")
+        self.btn_direita = QPushButton("Direita ▶")
+        self.btn_esquerda.clicked.connect(lambda: self.publish_direcao("ESQUERDA"))
+        self.btn_direita.clicked.connect(lambda: self.publish_direcao("DIREITA"))
+        layout_dir.addWidget(self.btn_esquerda)
+        layout_dir.addWidget(self.btn_direita)
+        layout_comandos.addLayout(layout_dir)
+
+        self.btn_iniciar = QPushButton("Iniciar")
+        self.btn_iniciar.setStyleSheet("background-color: green; color: white; font-weight: bold; height: 35px;")
+        self.btn_iniciar.setEnabled(False) 
+        self.btn_iniciar.clicked.connect(self.publish_iniciar)
+
+        self.btn_continuar = QPushButton("Continuar")
+        self.btn_continuar.setStyleSheet("background-color: #f0ad4e; color: black; font-weight: bold; height: 35px;")
+        self.btn_continuar.clicked.connect(self.publish_continuar)
+        
+        self.btn_para = QPushButton("PARAR (Emergência)")
+        self.btn_para.setStyleSheet("background-color: #d9534f; color: white; font-weight: bold; height: 35px;")
+        self.btn_para.clicked.connect(self.publish_parar)
+
+        self.btn_finalizar = QPushButton("Finalizar Inspeção")
+        self.btn_finalizar.setStyleSheet("background-color: #337ab7; color: white; font-weight: bold; height: 35px;")
+        self.btn_finalizar.clicked.connect(self.publish_finalizar)
+
+        layout_comandos.addWidget(self.btn_iniciar)
+        layout_comandos.addWidget(self.btn_continuar)
+        layout_comandos.addWidget(self.btn_para)
+        layout_comandos.addWidget(self.btn_finalizar)
+
+        self.btn_esquerda.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_direita.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_para.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_continuar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_finalizar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_iniciar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_modo_auto.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_modo_man.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        
+        layout_painel.addWidget(grupo_comandos)
+        layout_principal.addWidget(painel_controle)
+
+        # Divisor Lado Direito
+        divisor_visualizacao = QSplitter(Qt.Orientation.Vertical)
+
+        # Container da Simulação 2D
+        self.container_simulacao = QFrame()
+        self.container_simulacao.setFrameShape(QFrame.Shape.StyledPanel)
+        self.container_simulacao.setStyleSheet("background-color: #1e1e1e; border: 2px solid #555; border-radius: 6px;")
+        
+        layout_sim = QVBoxLayout(self.container_simulacao)
+        layout_sim.setContentsMargins(2, 2, 2, 2)
+        
+        self.pygame_simulador = PygameWidget()
+        layout_sim.addWidget(self.pygame_simulador)
+
+        # Gráfico estático inferior
+        self.container_graficos = QFrame()
+        self.container_graficos.setFrameShape(QFrame.Shape.StyledPanel)
+        self.container_graficos.setStyleSheet("background-color: #151515; border: 2px solid #333; border-radius: 6px;")
+        
+        layout_graf = QVBoxLayout(self.container_graficos)
+        layout_graf.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        self.grafico_realtime = GraficoLidar(self.container_graficos) # Cria o objeto da classe GraficoLidar
+        layout_graf.addWidget(self.grafico_realtime) # Gráfico aparecer na tela
+
+        divisor_visualizacao.addWidget(self.container_simulacao)
+        divisor_visualizacao.addWidget(self.container_graficos)
+        divisor_visualizacao.setSizes([420, 300])
+
+        layout_principal.addWidget(divisor_visualizacao)
+
+    def init_mqtt(self):
+        # Cria cliente MQTT
+        self.cliente_mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        # Define qual função será chamada ao receber mensagem
+        self.cliente_mqtt.on_message = self.ao_receber_mensagem
+        
+        try:
+            # Conecta ao broker Mosquitto local
+            self.cliente_mqtt.connect("localhost", 1883, 60)   
+
+            # Inscreve a GUI nos tópicos da telemetria
+            self.cliente_mqtt.subscribe("tunel/sensor/encoder")
+            self.cliente_mqtt.subscribe("tunel/sensor/lidar")
+            self.cliente_mqtt.subscribe("tunel/sensor/velocidade")
+            self.cliente_mqtt.subscribe("tunel/cmd/aceleracao")
+            self.cliente_mqtt.subscribe("tunel/status/inspecao")
+            self.cliente_mqtt.subscribe("tunel/sensor/camera")
+
+            # Inicia a thread de comunicação
+            self.cliente_mqtt.loop_start()
+
+            print("[GUI MQTT] Conectado com sucesso ao Broker Mosquitto.")
+
+        except Exception as e:
+            print(f"[ERRO GUI MQTT] Não foi possível conectar ao Broker: {e}")
+
+    def ao_receber_mensagem(self, client, userdata, msg):
+        # Converte a mensagem recebida do MQTT em um sinal Qt para a interface
+        self.sinais.dados_recebidos.emit(msg.topic, msg.payload.decode())
+
+    def processar_atualizacao_gui(self, topico, payload):
+        # Atualização dos dados internos
+
+        if topico == "tunel/sensor/encoder":      # Atualiza encoder recebido
+            self.ultimo_encoder = int(payload)
+        elif topico == "tunel/sensor/lidar":      # Atualiza leitura LIDAR 
+            self.ultimo_lidar = float(payload)
+        elif topico == "tunel/sensor/velocidade": # Atualiza velocidade
+            self.ultima_velocidade = float(payload)
+        elif topico == "tunel/cmd/aceleracao":    # Atualiza aceleração
+            self.ultima_aceleracao = float(payload)
+        elif topico == "tunel/status/inspecao":   # Atualiza estado da inspeção
+            self.status_inspecao = int(payload)
+        elif topico == "tunel/sensor/camera":
+            print(f"\033[1;36m[DEBUG GUI] Sinal Câmera: '{payload}'\033[0m")
+            
+            if "CLICK" in payload: 
+                print("\033[1;32m[DEBUG GUI] Acionando Pygame!\033[0m")
+                self.pygame_simulador.disparar_flash_camera()
+
+    def atualizar_tela(self):
+        # Atualização dos indicadores numéricos 
+
+        self.lbl_encoder.setText(f"{self.ultimo_encoder} m")
+        self.lbl_lidar.setText(f"{self.ultimo_lidar:.2f} m")
+        self.lbl_velocidade.setText(f"{self.ultima_velocidade:.2f} m/s")
+        self.lbl_aceleracao.setText(f"{self.ultima_aceleracao:.2f} m/s²")
+        
+        # Atualiza visualização 2D
+        self.pygame_simulador.atualizar_dados(
+            self.ultimo_encoder, 
+            self.ultima_velocidade, 
+            self.ultimo_lidar, 
+            self.status_inspecao
+        )
+
+        # Atualiza gráfico LIDAR
+        if self.missao_iniciada:
+            self.grafico_realtime.atualizar_ponto(self.ultimo_encoder, self.ultimo_lidar)
+
+        if not self.missao_iniciada:
+            self.lbl_inspecao.setText("Aguardando...")
+            self.lbl_inspecao.setStyleSheet("color: gray; font-weight: bold; font-size: 14px;")
+        elif self.status_inspecao == 1:
+            self.lbl_inspecao.setText("FALHA DETECTADA")
+            self.lbl_inspecao.setStyleSheet("color: red; font-weight: bold; font-size: 14px;")
+        else:
+            self.lbl_inspecao.setText("TETO INTEGRAL")
+            self.lbl_inspecao.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
+
+    def publish_iniciar(self):
+        # Inicia a inspeção
+        self.missao_iniciada = True
+        self.btn_iniciar.setText("INICIAR")
+        self.publish_mqtt_data("tunel/cmd/modo", self.modo_operacao)
+        self.publish_mqtt_data("tunel/cmd/iniciar", "1")
+        self.btn_iniciar.setEnabled(False)
+
+    def publish_parar(self):
+        # Comando parar/pausar inspeção
+        print("[GUI COMANDO] EMERGÊNCIA: Parando o robô!")
+        self.publish_mqtt_data("tunel/controle/direcao", "PARAR")
+        self.lbl_inspecao.setText("PARADA DE EMERGÊNCIA")
+        self.lbl_inspecao.setStyleSheet("color: red; font-weight: bold; font-size: 14px;")
+        self.setFocus()
+
+    def publish_continuar(self):
+        # Comando continuar inspeção (reverte o botão parar)
+        print("[GUI COMANDO] Retomando operação...")
+        self.publish_mqtt_data("tunel/controle/direcao", "CONTINUAR")
+        self.setFocus()
+
+    def publish_finalizar(self):
+        # Comando de finalizar inspeção 
+
+        print("[GUI COMANDO] Finalizando inspeção e resetando sistema.")
+        # Puxa o freio de mão para cravar o robô
+        self.publish_mqtt_data("tunel/controle/direcao", "PARAR")
+        
+        # Informa a rede inteira (C++ e Física) que a missão acabou
+        self.publish_mqtt_data("tunel/sistema/status", "SIMULACAO_CONCLUIDA")
+
+        self.grafico_realtime.resetar_grafico()
+
+        # Gera uma cópia própria da inspeção feita 
+        arquivo_base = "telemetria_inspecao.csv"
+        
+        if os.path.exists(arquivo_base):
+            # Cria o sufixo com Ano, Mês, Dia, Hora, Minuto e Segundo
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            nome_historico = f"historico_inspecao_{timestamp}.csv"
+            
+            try:
+                # Copia o arquivo fixo gerando o log histórico desta corrida
+                shutil.copy2(arquivo_base, nome_historico)
+                print(f"[GUI] Histórico salvo com sucesso: {nome_historico}")
+            except Exception as e:
+                print(f"[ERRO] Falha ao clonar o arquivo de log: {e}")
+        else:
+            print("[AVISO] Arquivo base não encontrado. Nenhuma cópia gerada.")
+        
+        # Restaura o estado da Interface
+        self.missao_iniciada = False
+        self.btn_iniciar.setText("Iniciar")
+        self.btn_iniciar.setEnabled(True)
+        self.lbl_inspecao.setText("Inspeção Finalizada")
+        self.lbl_inspecao.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
+        self.setFocus()
+
+    def publish_mqtt_data(self, topic, payload):
+        # Publica mensagem MQTT
+        self.cliente_mqtt.publish(topic, payload)
+
+    def publish_comando(self, tipo, valor):
+        # Seleção do tipo de comando, Manual ou Automático 
+        if valor == "AUTOMATICO":
+            self.modo_operacao = "1"
+            self.lbl_modo.setText("AUTOMÁTICO")
+            self.lbl_modo.setStyleSheet("color: darkorange; font-weight: bold; font-size: 14px;")
+            self.btn_esquerda.setEnabled(False)
+            self.btn_direita.setEnabled(False)
+            self.publish_mqtt_data("tunel/controle/modo", "AUTO")
+        else:
+            self.modo_operacao = "0"
+            self.lbl_modo.setText("MANUAL")
+            self.lbl_modo.setStyleSheet("color: blue; font-weight: bold; font-size: 14px;")
+            self.btn_esquerda.setEnabled(True)
+            self.btn_direita.setEnabled(True)
+            self.publish_mqtt_data("tunel/controle/modo", "MANUAL")
+            
+        self.btn_iniciar.setEnabled(True)  # Botão inicar só é habilitado após escolha do modo
+
+    def publish_direcao(self, comando):
+        print(f"[GUI COMANDO] Enviando ação de movimentação: {comando}")
+        # Envia comando de movimento para controlar o robô
+        self.publish_mqtt_data("tunel/controle/direcao", comando)
+
+    def closeEvent(self, event):
+        # Encerramento
+        self.cliente_mqtt.loop_stop()  # Para a thread MQTT
+        self.cliente_mqtt.disconnect() # Fecha conexão MQTT
+        self.pygame_simulador.close()  # Encerra o simulador Pygame
+        event.accept() # Fechamento da janela
+
+    def keyPressEvent(self, event):
+        # Executa quando a tecla é pressionada
+
+        if event.isAutoRepeat(): # Ignora eventos repetidos
+            return
+        
+        if self.btn_iniciar.isEnabled(): # Ignora comandos se a inspeção ainda n foi iniciada
+            return 
+        
+        # Em modo automático, não controla a operação
+        if self.modo_operacao == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
+            return
+
+        if event.key() == Qt.Key.Key_Right:
+            self.publish_direcao("DIREITA")
+            self.btn_direita.setDown(True)
+        elif event.key() == Qt.Key.Key_Left:
+            self.publish_direcao("ESQUERDA")
+            self.btn_esquerda.setDown(True)
+        elif event.key() == Qt.Key.Key_Space: 
+            self.publish_direcao("PARAR")
+            self.btn_para.setDown(True)
+
+    def keyReleaseEvent(self, event):
+        # Executando quando a tecla é solta
+
+        if event.isAutoRepeat(): 
+            return
+        
+        if self.modo_operacao == "1" and event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
+            return
+        
+        if event.key() == Qt.Key.Key_Right:
+            self.btn_direita.setDown(False)
+            self.publish_direcao("PARAR") 
+        elif event.key() == Qt.Key.Key_Left:
+            self.btn_esquerda.setDown(False)
+            self.publish_direcao("PARAR")
+        elif event.key() == Qt.Key.Key_Space:
+            self.btn_para.setDown(False)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = GUIOperacaoRemota()
+    window.show()
+    sys.exit(app.exec())
+```
+
+## *view_2d.py*
+
+```python
+#!/usr/bin/env python3
+import os
+import sys
+import math
+import pygame
+
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QImage, QPixmap, QPainter
+
+from mapa_tunel import calcular_altura_teto
+
+# Desativa drivers de vídeo físicos do Pygame/SDL (Roda em modo "Dummy" na memória)
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+
+class PygameWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Variáveis de telemetria sincronizadas
+        self.encoder_m = 0
+        self.velocidade_ms = 0.0
+        self.lidar_m = 10.0
+        self.status_inspecao = 0
+        self.frames_flash = 0
+        
+        # Parâmetros de escala e resolução idênticos ao RobotPhysicsSimulator
+        self.resolucao_mapa = 0.1  # 1 ponto a cada 10cm
+        self.escala_y = 20.0       # Multiplicador para converter metros em pixels na tela
+        
+        # Inicializa o Pygame internamente sem criar janela física
+        pygame.init()
+        pygame.font.init()
+        
+        self.largura = 600
+        self.altura = 350
+        self.surface_virtual = pygame.Surface((self.largura, self.altura))
+        self.q_pixmap = QPixmap()
+
+        # Timer interno para gerenciar o redesenho constante (~60 FPS)
+        self.timer_fps = QTimer(self)
+        self.timer_fps.timeout.connect(self.processar_e_atualizar)
+        self.timer_fps.start(16) 
+
+    def atualizar_dados(self, encoder, velocidaded, lidar, status):
+        """Atualiza os parâmetros internos vindo do broker MQTT."""
+        self.encoder_m = encoder
+        self.velocidade_ms = float(velocidaded)
+        self.lidar_m = float(lidar)
+        self.status_inspecao = int(status)
+
+    def disparar_flash_camera(self):
+        '''Método chamado pela GUI quando C++ avisa que tirou uma foto.'''
+        self.frames_flash = 15 # Mantém o flash por 15 frames
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.largura = max(self.width(), 100)
+        self.altura = max(self.height(), 100)
+        self.surface_virtual = pygame.Surface((self.largura, self.altura))
+
+    def processar_e_atualizar(self):
+        self.renderizar_conteudo_pygame()
+        self.converter_pygame_para_pyqt()
+        self.update()
+
+    def renderizar_conteudo_pygame(self):
+        """Desenha a lógica do robô e o teto com anomalias baseado no deslocamento."""
+        COR_FUNDO = (30, 30, 30)
+        COR_PAREDE = (65, 65, 65)
+        COR_ROBO = (0, 120, 255) if self.status_inspecao == 0 else (230, 40, 40)
+        COR_LASER = (0, 255, 60) if self.status_inspecao == 0 else (255, 30, 30)
+
+        self.surface_virtual.fill(COR_FUNDO)
+
+        # Altura física de referência para o chão da simulação
+        chao_y = int(self.altura * 0.75)
+        
+        # O robô fica fixado no centro horizontal da viewport
+        centro_tela_x = self.largura // 2
+
+        # -----------------------------------------------------------------
+        # GERAÇÃO E RENDERIZAÇÃO DO TETO DINÂMICO COORDENADO PELO ENCODER
+        # -----------------------------------------------------------------
+        pontos_teto_pixels = []
+        
+        # Varre cada pixel de largura da tela para amostrar o perfil correto do túnel
+        for pixel_x in range(0, self.largura, 2): # Amostragem a cada 2px para otimizar performance
+            # Calcula a distância em metros desse pixel em relação à posição global do robô
+            distancia_relativa_m = (pixel_x - centro_tela_x) / self.escala_y
+            posicao_global_m = self.encoder_m + distancia_relativa_m
+            
+            # Limita a leitura matemática ao tamanho total do túnel mapeado
+            posicao_global_m = max(0.0, min(posicao_global_m, 250.0))
+            
+            # Obtém a altura física estrutural do teto (em metros) naquele ponto do mapa
+            altura_m = calcular_altura_teto(posicao_global_m)
+            
+            # Converte a leitura métrica para coordenadas de pixels na tela
+            # O teto é desenhado de cima para baixo a partir do chão do simulador
+            teto_pixel_y = chao_y - int(altura_m * self.escala_y)
+            pontos_teto_pixels.append((pixel_x, teto_pixel_y))
+
+        # Desenha o perfil recortado do teto deformado usando linhas conectadas
+        if len(pontos_teto_pixels) > 1:
+            pygame.draw.lines(self.surface_virtual, COR_PAREDE, False, pontos_teto_pixels, 5)
+
+        # -----------------------------------------------------------------
+        # RENDERIZAÇÃO DO CHÃO (ESTEIRA DE MOVIMENTO INFINITO)
+        # -----------------------------------------------------------------
+        # Deslocamento visual baseado no acumulador do encoder para sincronizar com o teto
+        offset_chao = -int((self.encoder_m * self.escala_y) % 40)
+        for x in range(offset_chao - 40, self.largura + 40, 40):
+            pygame.draw.line(self.surface_virtual, (55, 55, 55), (x, chao_y), (x + 15, chao_y + 12), 3)
+
+        pygame.draw.line(self.surface_virtual, COR_PAREDE, (0, chao_y), (self.largura, chao_y), 5)
+
+        # -----------------------------------------------------------------
+        # DESENHO DO ROBÔ E DO FEIXE LASER ATIVO
+        # -----------------------------------------------------------------
+        r_largura, r_altura = 75, 32
+        r_x = centro_tela_x - (r_largura // 2)
+        r_y = chao_y - r_altura
+
+        # Desenha Chassi e Rodas
+        pygame.draw.rect(self.surface_virtual, COR_ROBO, (r_x, r_y, r_largura, r_altura), border_radius=4)
+        pygame.draw.circle(self.surface_virtual, (15, 15, 15), (r_x + 18, chao_y), 9)
+        pygame.draw.circle(self.surface_virtual, (15, 15, 15), (r_x + r_largura - 18, chao_y), 9)
+
+        # Emissor óptico centralizado
+        s_x = r_x + (r_largura // 2)
+        s_y = r_y - 4
+        pygame.draw.rect(self.surface_virtual, (180, 180, 180), (s_x - 6, s_y, 12, 4))
+
+        # Calcula o ponto de colisão exato do laser baseado no teto 
+        # calculado para a posição central do robô
+        altura_teto_atual_m = calcular_altura_teto(self.encoder_m)
+        laser_fim_y = chao_y - int(altura_teto_atual_m * self.escala_y)
+
+        # Desenha feixe dinâmico e o ponto de impacto
+        pygame.draw.line(self.surface_virtual, COR_LASER, (s_x, s_y), (s_x, laser_fim_y), 2)
+        pygame.draw.circle(self.surface_virtual, COR_LASER, (s_x, laser_fim_y), 5)
+
+        # -----------------------------------------------------------------
+        # TELEMETRIA OVERLAY (TEXTOS)
+        # -----------------------------------------------------------------
+        font = pygame.font.SysFont("monospace", 12, bold=True)
+        self.surface_virtual.blit(font.render(f"Posicao: {self.encoder_m} m", True, 
+          (200, 200, 200)), (15, 15))
+        self.surface_virtual.blit(font.render(f"Velocidade: {self.velocidade_ms:.2f} m/s", True, 
+          (200, 200, 200)), (15, 32))
+        self.surface_virtual.blit(font.render(f"LIDAR (Real): {self.lidar_m:.2f} m", True, COR_LASER), 
+          (15, 49))
+
+        font_aviso = pygame.font.SysFont("sans", 14, bold=True)
+        
+        if self.status_inspecao == 1:
+            texto_alerta = "FALHA: SALIÊNCIA DETECTADA NO TETO"
+            cor_alerta = (255, 165, 0) 
+        elif self.status_inspecao == -1:
+            texto_alerta = "FALHA: BURACO DETECTADO NO TETO"
+            cor_alerta = (255, 50, 50) 
+        else: # Se for 0 
+            texto_alerta = "TRECHO RETO"
+            cor_alerta = (50, 255, 50) 
+            
+        # Renderiza o texto com a cor escolhida e centraliza na tela
+        txt = font_aviso.render(texto_alerta, True, cor_alerta)
+        self.surface_virtual.blit(txt, (self.largura // 2 - txt.get_width() // 2, 15))
+    
+        # Renderização do efeito da câmera
+        if self.frames_flash > 0:
+                # Cria uma "lente" transparente do mesmo tamanho da tela
+                lente_flash = pygame.Surface((self.largura, self.altura), pygame.SRCALPHA)
+                
+                # Calcula o Alpha (De 200 até 0) para um Fade Out suave
+                alpha = int((self.frames_flash / 20.0) * 200)
+                lente_flash.fill((255, 255, 255, alpha)) # Preenche com branco transparente
+                
+                # Renderiza a "lente" em cima da superfície virtual
+                self.surface_virtual.blit(lente_flash, (0, 0))
+                
+                # Põe o texto em preto bem nítido no centro
+                font_foto = pygame.font.SysFont("sans", 24, bold=True)
+                txt_foto = font_foto.render("Tirando Foto...", True, (0, 0, 0))
+                
+                pos_centro_x = self.largura // 2 - txt_foto.get_width() // 2
+                pos_centro_y = self.altura // 2 - txt_foto.get_height() // 2
+                
+                # Adiciona uma sombra branca para garantir leitura
+                sombra = font_foto.render("Tirando Foto...", True, (255, 255, 255))
+                self.surface_virtual.blit(sombra, (pos_centro_x + 2, pos_centro_y + 2))
+                self.surface_virtual.blit(txt_foto, (pos_centro_x, pos_centro_y))
+                
+                # Desconta o contador
+                self.frames_flash -= 1
+
+    def converter_pygame_para_pyqt(self):
+        dados_raw = pygame.image.tostring(self.surface_virtual, 'RGB')
+        q_img = QImage(dados_raw, self.largura, self.altura, QImage.Format.Format_RGB888)
+        self.q_pixmap = QPixmap.fromImage(q_img)
+
+    def paintEvent(self, event):
+        if not self.q_pixmap.isNull():
+            painter = QPainter(self)
+            painter.drawPixmap(0, 0, self.q_pixmap)
+            painter.end()
+
+    def closeEvent(self, event):
+        pygame.quit()
+        event.accept()
+```
+
+## *grafico_lifar.py*
+
+```python
+from PyQt6.QtWidgets import QWidget, QVBoxLayout
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+class GraficoLidar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)  # Inicialização da classe pai
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0) # Remoção de margens externas
+
+        # Guardar os pontos atuais X (encoder) e Y (LIDAR)
+        self.historico_x = []
+        self.historico_y = []
+
+        # Criação da figura Matplotlib
+        self.fig = Figure(figsize=(5, 3), facecolor='#151515')
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+
+        # Configuração dos Eixos
+        self.ax = self.fig.add_subplot(111) # 1 linha, 1 coluna, primeiro grafico
+        self.fig.subplots_adjust( # Ajuste das margens
+            left=0.12,
+            right=0.98,
+            top=0.90,
+            bottom=0.18
+        )
+        self.ax.set_facecolor('#151515')
+        
+        # Legendas do painel
+        self.ax.set_title('GRÁFICO DE DADOS LIDAR PROCESSADOS', 
+          color='#00ff00', 
+          fontfamily='monospace', 
+          fontsize=10, fontweight='bold', pad=10)
+        self.ax.set_xlabel('X: POSIÇÃO HORIZONTAL (m)', 
+          color='#00ff00', 
+          fontfamily='monospace', 
+          fontsize=8, fontweight='bold')
+        self.ax.set_ylabel('Y: DISTÂNCIA DO TETO / ALTURA (m)', 
+          color='#00ff00', 
+          fontfamily='monospace', 
+          fontsize=8, fontweight='bold')
+        
+        # Deixa os números das escalas e as bordas verdes
+        self.ax.tick_params(colors='#00ff00', labelsize=8)
+        for spine in self.ax.spines.values():
+            spine.set_color('#333') # cor das bordas
+
+        # Limites fixos de resolução do túnel (primeiros 40m) e altura regulada 
+        # (acima do valor máximo de buraco encontrado)
+        self.ax.set_xlim(0, 40)
+        self.ax.set_ylim(0, 14)
+        self.ax.grid(True, linestyle='--', color='#252525', alpha=0.7) # ativa a grade do gráfico
+
+        # Cria a linha verde do gráfico
+        self.linha_dinamica, = self.ax.plot([], [], color='#00ff00', linewidth=2)
+
+    # Recebe a telemetria do MQTT e adiciona no gráfico se o robô moveu
+    def atualizar_ponto(self, x_novo, y_novo):
+        if x_novo > 0:
+            # Filtro para não duplicar pontos na mesma posição
+            if not self.historico_x or self.historico_x[-1] != x_novo: 
+                # armazena novas posições
+                self.historico_x.append(x_novo)
+                self.historico_y.append(y_novo)
+                
+                # Atualiza os dados da linha e redesenha a tela de forma leve
+                self.linha_dinamica.set_data(self.historico_x, self.historico_y)
+
+                largura_da_janela = 40  # Quantos metros aparecem na tela por vez
+                folga_na_frente = 5     # Margem para ver o teto um pouco à frente do robô
+                
+                # Gráfico móvel
+                if x_novo > (largura_da_janela - folga_na_frente):
+                    # Se o robô avançou, a janela desliza junto com ele
+                    limite_esquerdo = x_novo - largura_da_janela + folga_na_frente
+                    limite_direito = x_novo + folga_na_frente
+                    self.ax.set_xlim(limite_esquerdo, limite_direito)
+                else:
+                    # Se ele está no início do túnel, mantém de 0 a 40m fixo
+                    self.ax.set_xlim(0, largura_da_janela)
+
+                self.canvas.draw_idle()
+
+    # Limpa a tela 
+    def resetar_grafico(self):
+        self.historico_x.clear()
+        self.historico_y.clear()
+        self.linha_dinamica.set_data([], [])
+        self.ax.set_xlim(0, 40)
+        self.canvas.draw_idle()
+```
+
+## *mapa_tunel.py*
+
+```python
+import math
+
+def calcular_altura_teto(x_metros):
+    altura_nominal = 10.0
+    
+    # === Bloco 1 de anomalias (0m - 50m) ===
+    # Saliência retangular: m10 ao m12
+    if 10.0 <= x_metros < 12.0:
+        return 9.0
+    # Buraco retangular: m25 ao m28
+    if 25.0 <= x_metros < 28.0:
+        return 11.2
+    # Saliência suave (Curva Senoidal): m45 ao m50
+    if 45.0 <= x_metros <= 50.0:
+        progresso = (x_metros - 45.0) / (50.0 - 45.0)
+        return 10.0 - 1.5 * math.sin(progresso * math.pi)
+    
+    # === Bloco 2 de anomalias (50m - 150m) ===
+    # Saliência triangular: m60 ao m63
+    if 60.0 <= x_metros <= 63.0:
+        meio = 61.5
+        if x_metros <= meio:
+            return 10.0 - ((x_metros - 60.0) / (meio - 60.0))
+        else:
+            return 9.0 + ((x_metros - meio) / (63.0 - meio))
+            
+    # Buraco triangular: m84 ao m88
+    if 84.0 <= x_metros <= 88.0:
+        meio = 86.0
+        if x_metros <= meio:
+            return 10.0 + 1.3 * ((x_metros - 84.0) / (meio - 84.0))
+        else:
+            return 11.3 - 1.3 * ((x_metros - meio) / (88.0 - meio))
+            
+    # Buraco retangular: m134 ao m144
+    if 134.0 <= x_metros < 144.0:
+        return 11.8
+        
+    # === Bloco 3 de anomalias (150m - 250m) ===
+    # Buraco retangular: m150 ao m155
+    if 150.0 <= x_metros < 155.0:
+        return 11.5
+    # Ondulações rítmicas de concreto: m200 ao m220
+    if 200.0 <= x_metros <= 220.0:
+        # Simplificação matemática equivalente e contínua para i * 0.5
+        return 10.0 - 1.2 * math.sin(x_metros * 5.0)
+        
+    return altura_nominal
+```
